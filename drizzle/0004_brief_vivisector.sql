@@ -1,0 +1,1 @@
+ALTER TABLE `payroll_records` ADD `winloss_amount` integer DEFAULT 0 NOT NULL;

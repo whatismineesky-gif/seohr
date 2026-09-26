@@ -1,0 +1,36 @@
+{
+  "source": { "name": "Cloudflare D1", "updatedAt": "ข้อมูลปัจจุบัน" },
+  "summary": {
+    "total": 0,
+    "active": 0,
+    "notice": 0,
+    "departed": 0,
+    "pendingRemoval": 0,
+    "monthlyPayroll": 0,
+    "salaryReady": 0,
+    "bankReady": 0,
+    "emailReady": 0,
+    "missingEmployeeId": 0
+  },
+  "employment": { "FullTime": 0, "PartTime": 0, "Freelancer": 0 },
+  "probation": { "ยังไม่ผ่าน": 0 },
+  "teams": [
+    { "team": "ทีม 1", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 2", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 3", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 4", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 5", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 6", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 7", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 8", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 9", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 10", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 11", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 12", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 13", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 14", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 15", "headcount": 0, "salary": 0 },
+    { "team": "ทีม 16", "headcount": 0, "salary": 0 }
+  ],
+  "employees": []
+}

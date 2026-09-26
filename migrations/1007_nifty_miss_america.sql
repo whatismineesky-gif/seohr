@@ -1,0 +1,1 @@
+ALTER TABLE `hr_system_users` ADD `menu_permissions` text DEFAULT '[]' NOT NULL;
