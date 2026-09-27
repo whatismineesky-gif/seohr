@@ -1329,7 +1329,8 @@ function AddEmployeeDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const id = String(form.get("id") || "").trim();
     const nickname = String(form.get("nickname") || "").trim();
     if (!id || !nickname) return;
@@ -1349,7 +1350,7 @@ function AddEmployeeDialog({
           form.get("startDate") || new Date().toISOString().slice(0, 10),
         ),
       });
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (saveError) {
       setError(
         saveError instanceof Error
