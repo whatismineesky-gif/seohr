@@ -295,7 +295,8 @@ export function AdvancePanel({ employees }: { employees: Employee[] }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setSaving(true);
     try {
       const response = await fetch("/api/advances", {
@@ -307,7 +308,7 @@ export function AdvancePanel({ employees }: { employees: Employee[] }) {
       if (!response.ok)
         throw new Error(result.error || "บันทึกรายการไม่สำเร็จ");
       toast.success("สร้างตารางผ่อนเรียบร้อยแล้ว");
-      event.currentTarget.reset();
+      formElement.reset();
       setAdvanceEmployeeId("");
       setRepaymentType("installment");
       await load();
