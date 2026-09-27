@@ -12,7 +12,7 @@ function bytesToHex(bytes: Uint8Array) {
 }
 
 async function hashPassword(password: string) {
-  const iterations = 210_000;
+  const iterations = 100_000;
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey(
     "raw",
