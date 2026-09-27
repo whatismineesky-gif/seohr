@@ -50,8 +50,14 @@ export async function POST(request: NextRequest) {
 
   const username = String(payload.username ?? "").trim();
   const password = String(payload.password ?? "");
-  const user = await database.prepare(`SELECT id, password_hash, status, failed_login_count, locked_until FROM users WHERE username = ? COLLATE NOCASE LIMIT 1`)
-    .bind(username).first<Record<string, unknown>>();
+  const user = await database.prepare(`
+    SELECT u.id, u.password_hash, u.status, u.failed_login_count, u.locked_until
+    FROM users u
+    LEFT JOIN hr_system_users h ON h.login_username = u.username COLLATE NOCASE
+    WHERE u.username = ? COLLATE NOCASE OR h.email = ? COLLATE NOCASE
+    ORDER BY CASE WHEN u.username = ? COLLATE NOCASE THEN 0 ELSE 1 END
+    LIMIT 1
+  `).bind(username, username, username).first<Record<string, unknown>>();
   const now = new Date();
   const lockedUntil = user?.locked_until ? new Date(String(user.locked_until)) : null;
   const valid = user?.status === "active" && (!lockedUntil || lockedUntil <= now) && await verifyPassword(password, String(user?.password_hash ?? ""));
