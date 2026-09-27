@@ -263,23 +263,82 @@ function SummaryCard({
   );
 }
 
-function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
-  const maxTeam = Math.max(...hrData.teams.map((team) => team.headcount));
+function Dashboard({
+  employees,
+  onNavigate,
+}: {
+  employees: Employee[];
+  onNavigate: (view: View) => void;
+}) {
+  const activeEmployees = employees.filter(
+    (employee) => employee.status === "ยังทำงานอยู่",
+  );
+  const notice = employees.filter(
+    (employee) => employee.status === "แจ้งลาออก",
+  ).length;
+  const pendingRemoval = employees.filter(
+    (employee) => employee.status === "รอคัดชื่อออก",
+  ).length;
+  const salaryReady = activeEmployees.filter(
+    (employee) => employee.hasSalary,
+  ).length;
+  const bankReady = activeEmployees.filter(
+    (employee) => employee.hasBank,
+  ).length;
+  const emailReady = activeEmployees.filter(
+    (employee) => employee.hasEmail,
+  ).length;
+  const monthlyPayroll = activeEmployees.reduce(
+    (sum, employee) => sum + (employee.salary ?? 0),
+    0,
+  );
+  const missingEmployeeId = employees.filter(
+    (employee) => !employee.id || /^TEMP[-_]/i.test(employee.id),
+  ).length;
+  const teamNames = Array.from(
+    new Set(activeEmployees.map((employee) => employee.team).filter(Boolean)),
+  );
+  const teams = Array.from(
+    new Set([
+      ...Array.from({ length: 16 }, (_, index) => `ทีม ${index + 1}`),
+      ...teamNames,
+    ]),
+  )
+    .map((name) => ({
+      name,
+      headcount: activeEmployees.filter((employee) => employee.team === name)
+        .length,
+    }))
+    .sort((left, right) =>
+      left.name.localeCompare(right.name, "th", { numeric: true }),
+    );
+  const maxTeam = Math.max(1, ...teams.map((team) => team.headcount));
+  const employment = activeEmployees.reduce<Record<string, number>>(
+    (counts, employee) => {
+      const label = employee.employment || "ไม่ระบุ";
+      counts[label] = (counts[label] ?? 0) + 1;
+      return counts;
+    },
+    {},
+  );
+  const probationPending = activeEmployees.filter(
+    (employee) => employee.probation === "ยังไม่ผ่าน",
+  ).length;
   const dataChecks = [
     {
       label: "มีข้อมูลเงินเดือน",
-      value: hrData.summary.salaryReady,
-      total: hrData.summary.active,
+      value: salaryReady,
+      total: activeEmployees.length,
     },
     {
       label: "มีข้อมูลบัญชีรับเงิน",
-      value: hrData.summary.bankReady,
-      total: hrData.summary.active,
+      value: bankReady,
+      total: activeEmployees.length,
     },
     {
       label: "มีอีเมลติดต่อ",
-      value: hrData.summary.emailReady,
-      total: hrData.summary.active,
+      value: emailReady,
+      total: activeEmployees.length,
     },
   ];
 
@@ -288,29 +347,29 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           label="พนักงานปัจจุบัน"
-          value={`${formatNumber.format(hrData.summary.active)} คน`}
-          note={`จากทั้งหมด ${formatNumber.format(hrData.summary.total)} ประวัติ`}
+          value={`${formatNumber.format(activeEmployees.length)} คน`}
+          note={`จากทั้งหมด ${formatNumber.format(employees.length)} ประวัติ`}
           icon={Users}
           tone="bg-indigo-50 text-indigo-700"
         />
         <SummaryCard
           label="ทีมที่ดูแล"
-          value={`${hrData.teams.length} ทีม`}
-          note="ข้อมูลครอบคลุมทีม 1–16"
+          value={`${teamNames.length} ทีม`}
+          note="คำนวณจากพนักงานที่ยังทำงานอยู่"
           icon={Building2}
           tone="bg-cyan-50 text-cyan-700"
         />
         <SummaryCard
           label="แจ้งลาออก"
-          value={`${hrData.summary.notice} รายการ`}
-          note={`${hrData.summary.pendingRemoval} รายการรอคัดชื่อออก`}
+          value={`${notice} รายการ`}
+          note={`${pendingRemoval} รายการรอคัดชื่อออก`}
           icon={UserMinus}
           tone="bg-amber-50 text-amber-700"
         />
         <SummaryCard
           label="ยอดเงินเดือนที่มีข้อมูล"
-          value={formatMoney.format(hrData.summary.monthlyPayroll)}
-          note={`${hrData.summary.salaryReady}/${hrData.summary.active} คนพร้อมคำนวณ`}
+          value={formatMoney.format(monthlyPayroll)}
+          note={`${salaryReady}/${activeEmployees.length} คนพร้อมคำนวณ`}
           icon={Banknote}
           tone="bg-emerald-50 text-emerald-700"
         />
@@ -332,7 +391,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
             </Button>
           </div>
           <div className="team-chart" aria-label="กราฟจำนวนพนักงานแต่ละทีม">
-            {hrData.teams.map((team) => (
+            {teams.map((team) => (
               <div key={team.name} className="team-bar-row">
                 <span>{team.name.replace("ทีม ", "T")}</span>
                 <div className="team-bar-track">
@@ -362,7 +421,8 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
           </div>
           <div className="space-y-6 pt-1">
             {dataChecks.map((item) => {
-              const percent = Math.round((item.value / item.total) * 100);
+              const percent =
+                item.total > 0 ? Math.round((item.value / item.total) * 100) : 0;
               return (
                 <div key={item.label}>
                   <div className="mb-2 flex items-center justify-between text-sm">
@@ -381,7 +441,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
             <AlertTriangle aria-hidden="true" />
             <span>
               <strong>
-                พบรหัสพนักงานชั่วคราว {hrData.summary.missingEmployeeId} รายการ
+                พบรหัสพนักงานชั่วคราว {missingEmployeeId} รายการ
               </strong>
               <small>ควรกำหนดรหัสจริงก่อนเชื่อมเงินเดือน</small>
             </span>
@@ -399,7 +459,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
             </div>
           </div>
           <div className="employment-grid">
-            {Object.entries(hrData.employment).map(([label, count], index) => (
+            {Object.entries(employment).map(([label, count], index) => (
               <div key={label} className="employment-item">
                 <span className={`legend-dot dot-${index + 1}`} />
                 <div>
@@ -424,7 +484,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
               <span>
                 <strong>เติมข้อมูลเงินเดือนที่ขาด</strong>
                 <small>
-                  {hrData.summary.active - hrData.summary.salaryReady} คน
+                  {activeEmployees.length - salaryReady} คน
                 </small>
               </span>
               <ChevronRight />
@@ -434,7 +494,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
               <span>
                 <strong>ตรวจรายการ Offboarding</strong>
                 <small>
-                  {hrData.summary.notice + hrData.summary.pendingRemoval} รายการ
+                  {notice + pendingRemoval} รายการ
                 </small>
               </span>
               <ChevronRight />
@@ -443,7 +503,7 @@ function Dashboard({ onNavigate }: { onNavigate: (view: View) => void }) {
               <span className="task-marker bg-indigo-500" />
               <span>
                 <strong>ติดตามผู้ยังไม่ผ่านโปร</strong>
-                <small>{hrData.probation["ยังไม่ผ่าน"] || 0} คน</small>
+                <small>{probationPending} คน</small>
               </span>
               <ChevronRight />
             </button>
@@ -1608,6 +1668,7 @@ export default function PeopleOSClient() {
           )}
           {!accessLoading && access && view === "dashboard" && (
             <Dashboard
+              employees={employees}
               onNavigate={(next) =>
                 access.permissions.includes(next) && setView(next)
               }
