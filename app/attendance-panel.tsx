@@ -18,7 +18,6 @@ import {
   Settings2,
   ShieldCheck,
   Trash2,
-  UserCog,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -66,7 +65,6 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { SearchableEmployeeSelect } from "@/components/searchable-employee-select";
 
 type Role = "employee" | "hr" | "audit";
 type EventType = "absence" | "meeting_leave" | "late";
@@ -364,11 +362,6 @@ export function AttendancePanel() {
     triggerFrom: 1,
     actionValue: 0,
   });
-  const [userForm, setUserForm] = useState({
-    email: "",
-    role: "employee" as Role,
-    employeeId: "",
-  });
   const [editingRecord, setEditingRecord] = useState<
     AttendanceData["records"][number] | null
   >(null);
@@ -524,15 +517,6 @@ export function AttendancePanel() {
       });
   }
 
-  async function submitUser(event: FormEvent) {
-    event.preventDefault();
-    const ok = await post(
-      { action: "save_user", ...userForm },
-      "บันทึกสิทธิ์ผู้ใช้แล้ว",
-    );
-    if (ok) setUserForm({ email: "", role: "employee", employeeId: "" });
-  }
-
   if (loading && !data) {
     return (
       <div className="grid min-h-64 place-items-center rounded-2xl border border-slate-200 bg-white">
@@ -572,11 +556,6 @@ export function AttendancePanel() {
           {data.currentUser.role === "hr" && (
             <TabsTrigger value="rules">
               <Settings2 /> ตั้งค่าเงื่อนไข
-            </TabsTrigger>
-          )}
-          {data.currentUser.role === "hr" && (
-            <TabsTrigger value="users">
-              <UserCog /> สิทธิ์ผู้ใช้
             </TabsTrigger>
           )}
         </TabsList>
@@ -725,7 +704,7 @@ export function AttendancePanel() {
               <div className="mb-4 flex gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                 บัญชีนี้ยังไม่เชื่อมกับรหัสพนักงาน กรุณาให้ HR
-                กำหนดในแท็บสิทธิ์ผู้ใช้
+                กำหนดในเมนูจัดการสิทธิ์
               </div>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1335,116 +1314,6 @@ export function AttendancePanel() {
         </TabsContent>
       )}
 
-      {data.currentUser.role === "hr" && (
-        <TabsContent value="users" className="space-y-4">
-          <form
-            onSubmit={submitUser}
-            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <div className="mb-5">
-              <h3 className="font-semibold text-slate-950">
-                กำหนดสิทธิ์จากอีเมลบัญชี
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                เชื่อมบัญชีผู้ใช้กับพนักงาน และกำหนดบทบาท HR / Audit / พนักงาน
-              </p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-[1.3fr_.7fr_1.2fr_auto] md:items-end">
-              <label className="field-label">
-                อีเมล
-                <Input
-                  type="email"
-                  required
-                  value={userForm.email}
-                  onChange={(event) =>
-                    setUserForm({ ...userForm, email: event.target.value })
-                  }
-                  placeholder="name@company.com"
-                />
-              </label>
-              <label className="field-label">
-                บทบาท
-                <select
-                  className="native-select"
-                  value={userForm.role}
-                  onChange={(event) =>
-                    setUserForm({
-                      ...userForm,
-                      role: event.target.value as Role,
-                    })
-                  }
-                >
-                  {Object.entries(roleLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field-label">
-                เชื่อมกับพนักงาน
-                <SearchableEmployeeSelect
-                  employees={data.employees}
-                  value={userForm.employeeId}
-                  emptyLabel="ไม่เชื่อมพนักงาน"
-                  onChange={(employeeId) =>
-                    setUserForm({ ...userForm, employeeId })
-                  }
-                />
-              </label>
-              <Button type="submit" disabled={saving}>
-                <Save />
-                บันทึกสิทธิ์
-              </Button>
-            </div>
-          </form>
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>บัญชี</TableHead>
-                  <TableHead>บทบาท</TableHead>
-                  <TableHead>พนักงานที่เชื่อม</TableHead>
-                  <TableHead className="text-right">แก้ไข</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.users.map((user) => (
-                  <TableRow key={user.email}>
-                    <TableCell>
-                      <div className="font-medium">
-                        {user.display_name || user.email}
-                      </div>
-                      <div className="text-xs text-slate-500">{user.email}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{roleLabels[user.role]}</Badge>
-                    </TableCell>
-                    <TableCell>{user.nickname || "—"}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() =>
-                          setUserForm({
-                            email: user.email,
-                            role: user.role,
-                            employeeId: user.employee_id || "",
-                          })
-                        }
-                      >
-                        <Pencil />
-                        แก้ไข
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-      )}
     </Tabs>
   );
 }
