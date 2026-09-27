@@ -35,6 +35,7 @@ type UserRow = {
   nickname: string;
   team: string;
   permissions: string[];
+  loginUsername: string;
 };
 type Employee = { id: string; nickname: string; team: string; email: string };
 type AccessData = {
@@ -79,6 +80,8 @@ export function AccessPanel({
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({
     email: "",
+    loginUsername: "",
+    password: "",
     role: "employee" as Role,
     employeeId: "",
     permissions: defaults.employee,
@@ -125,6 +128,8 @@ export function AccessPanel({
   function editUser(user: UserRow) {
     setForm({
       email: user.email,
+      loginUsername: user.loginUsername || "",
+      password: "",
       role: user.role,
       employeeId: user.employeeId || "",
       permissions: user.permissions,
@@ -147,6 +152,8 @@ export function AccessPanel({
       toast.success("บันทึกสิทธิ์ผู้ใช้งานแล้ว");
       setForm({
         email: "",
+        loginUsername: "",
+        password: "",
         role: "employee",
         employeeId: "",
         permissions: defaults.employee,
@@ -222,6 +229,32 @@ export function AccessPanel({
               />
             </label>
             <label className="field-label">
+              Username สำหรับ Login
+              <Input
+                value={form.loginUsername}
+                onChange={(event) =>
+                  setForm({ ...form, loginUsername: event.target.value })
+                }
+                placeholder="เช่น minee03"
+                autoComplete="off"
+              />
+            </label>
+            <label className="field-label">
+              รหัสผ่านเริ่มต้น
+              <Input
+                type="password"
+                value={form.password}
+                onChange={(event) =>
+                  setForm({ ...form, password: event.target.value })
+                }
+                placeholder="อย่างน้อย 8 ตัวอักษร"
+                autoComplete="new-password"
+              />
+              <span className="text-xs font-normal text-muted-foreground">
+                ผู้ใช้เดิมปล่อยว่างได้ หากไม่ต้องการเปลี่ยนรหัสผ่าน
+              </span>
+            </label>
+            <label className="field-label">
               บทบาท
               <select
                 className="native-select"
@@ -285,7 +318,7 @@ export function AccessPanel({
           <Button
             className="mt-6 w-full sm:w-auto"
             onClick={save}
-            disabled={saving || !form.email}
+            disabled={saving || !form.email || !form.loginUsername}
           >
             {saving ? <Loader2 className="animate-spin" /> : <Save />}{" "}
             {saving ? "กำลังบันทึก..." : "บันทึกสิทธิ์ผู้ใช้งาน"}
@@ -332,6 +365,9 @@ export function AccessPanel({
                       <strong>{user.displayName || user.email}</strong>
                       <div className="text-xs text-muted-foreground">
                         {user.email}
+                      </div>
+                      <div className="text-xs text-indigo-600">
+                        Username: {user.loginUsername || "ยังไม่ได้กำหนด"}
                       </div>
                     </TableCell>
                     <TableCell>
