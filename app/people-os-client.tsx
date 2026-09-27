@@ -3,6 +3,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Banknote,
   Building2,
   CalendarDays,
@@ -123,6 +126,17 @@ type Employee = {
   createdAt?: string;
   updatedAt?: string;
 };
+
+type EmployeeSortKey =
+  | "id"
+  | "nickname"
+  | "team"
+  | "position"
+  | "employment"
+  | "status"
+  | "tenure";
+
+type SortDirection = "asc" | "desc";
 
 const initialEmployees = hrData.employees.map((employee, index) => ({
   ...employee,
@@ -516,25 +530,62 @@ function Dashboard({
   );
 }
 
+function SortableEmployeeHead({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: EmployeeSortKey;
+  activeKey: EmployeeSortKey;
+  direction: SortDirection;
+  onSort: (key: EmployeeSortKey) => void;
+}) {
+  const active = activeKey === sortKey;
+  const Icon = !active ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        className="-ml-2 inline-flex h-9 items-center gap-1.5 rounded-md px-2 font-medium text-slate-700 transition-colors hover:bg-slate-200/70 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+        onClick={() => onSort(sortKey)}
+        title={`เรียงตาม${label}`}
+      >
+        {label}
+        <Icon className={`size-3.5 ${active ? "text-blue-600" : "text-slate-400"}`} />
+      </button>
+    </TableHead>
+  );
+}
+
 function EmployeeTable({
   rows,
   onSelect,
+  sortKey,
+  sortDirection,
+  onSort,
   compact = false,
 }: {
   rows: Employee[];
   onSelect: (employee: Employee) => void;
+  sortKey: EmployeeSortKey;
+  sortDirection: SortDirection;
+  onSort: (key: EmployeeSortKey) => void;
   compact?: boolean;
 }) {
   return (
     <Table>
       <TableHeader>
         <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-          <TableHead>รหัส</TableHead>
-          <TableHead>ชื่อเล่น</TableHead>
-          <TableHead>ทีม</TableHead>
-          {!compact && <TableHead>ตำแหน่ง</TableHead>}
-          <TableHead>ประเภท</TableHead>
-          <TableHead>{compact ? "อายุงาน" : "สถานะ"}</TableHead>
+          <SortableEmployeeHead label="รหัส" sortKey="id" activeKey={sortKey} direction={sortDirection} onSort={onSort} />
+          <SortableEmployeeHead label="ชื่อเล่น" sortKey="nickname" activeKey={sortKey} direction={sortDirection} onSort={onSort} />
+          <SortableEmployeeHead label="ทีม" sortKey="team" activeKey={sortKey} direction={sortDirection} onSort={onSort} />
+          {!compact && <SortableEmployeeHead label="ตำแหน่ง" sortKey="position" activeKey={sortKey} direction={sortDirection} onSort={onSort} />}
+          <SortableEmployeeHead label="ประเภท" sortKey="employment" activeKey={sortKey} direction={sortDirection} onSort={onSort} />
+          <SortableEmployeeHead label={compact ? "อายุงาน" : "สถานะ"} sortKey={compact ? "tenure" : "status"} activeKey={sortKey} direction={sortDirection} onSort={onSort} />
           <TableHead className="w-12" />
         </TableRow>
       </TableHeader>
@@ -594,6 +645,8 @@ function Directory({
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Employee | null>(null);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<EmployeeSortKey>("team");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const pageSize = 12;
 
   const baseRows = useMemo(() => {
@@ -621,9 +674,47 @@ function Directory({
     });
   }, [baseRows, query, team, status]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sortedRows = useMemo(() => {
+    const getValue = (employee: Employee) => {
+      if (sortKey === "tenure") {
+        return Number(employee.tenure.match(/\d+/)?.[0] ?? 0);
+      }
+      return employee[sortKey] ?? "";
+    };
+
+    return [...filtered].sort((left, right) => {
+      const leftValue = getValue(left);
+      const rightValue = getValue(right);
+      const comparison =
+        typeof leftValue === "number" && typeof rightValue === "number"
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue), "th", {
+              numeric: true,
+              sensitivity: "base",
+            });
+      if (comparison !== 0)
+        return sortDirection === "asc" ? comparison : -comparison;
+
+      return left.nickname.localeCompare(right.nickname, "th", {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+  }, [filtered, sortKey, sortDirection]);
+
+  function changeSort(key: EmployeeSortKey) {
+    if (key === sortKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+    setPage(1);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, pageCount);
-  const visibleRows = filtered.slice(
+  const visibleRows = sortedRows.slice(
     (safePage - 1) * pageSize,
     safePage * pageSize,
   );
@@ -771,6 +862,9 @@ function Directory({
           <EmployeeTable
             rows={visibleRows}
             onSelect={setSelected}
+            sortKey={sortKey}
+            sortDirection={sortDirection}
+            onSort={changeSort}
             compact={mode === "members"}
           />
         </div>
