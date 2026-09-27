@@ -1026,7 +1026,11 @@ function EmployeeEditDialog({
                 <TabsTrigger value="contact">ข้อมูลติดต่อและระบบ</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="work" className="pt-5">
+              <TabsContent
+                value="work"
+                forceMount
+                className="pt-5 data-[state=inactive]:hidden"
+              >
                 <div className="edit-form-grid">
                   <label className="field-label">
                     รหัสพนักงาน
@@ -1125,7 +1129,11 @@ function EmployeeEditDialog({
                 </div>
               </TabsContent>
 
-              <TabsContent value="payment" className="pt-5">
+              <TabsContent
+                value="payment"
+                forceMount
+                className="pt-5 data-[state=inactive]:hidden"
+              >
                 <div className="edit-form-grid">
                   <label className="field-label sm:col-span-2">
                     เงินเดือน
@@ -1209,7 +1217,11 @@ function EmployeeEditDialog({
                 </div>
               </TabsContent>
 
-              <TabsContent value="contact" className="pt-5">
+              <TabsContent
+                value="contact"
+                forceMount
+                className="pt-5 data-[state=inactive]:hidden"
+              >
                 <div className="edit-form-grid">
                   <label className="field-label sm:col-span-2">
                     อีเมล
