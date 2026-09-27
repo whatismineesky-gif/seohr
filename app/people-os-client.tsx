@@ -11,6 +11,8 @@ import {
   ChevronRight,
   CircleDollarSign,
   Download,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   LayoutDashboard,
   Loader2,
@@ -829,6 +831,11 @@ function EmployeeEditDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [showBankAccount, setShowBankAccount] = useState(false);
+
+  useEffect(() => {
+    setShowBankAccount(false);
+  }, [employee?.id, open]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1043,14 +1050,50 @@ function EmployeeEditDialog({
                   </label>
                   <label className="field-label">
                     เลขบัญชี
-                    <Input
-                      name="bankAccount"
-                      type="password"
-                      inputMode="numeric"
-                      defaultValue={employee.bankAccount}
-                      autoComplete="off"
-                      aria-label="เลขบัญชี (ปกปิด)"
-                    />
+                    <div className="relative">
+                      <Input
+                        name="bankAccount"
+                        type={showBankAccount ? "text" : "password"}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        defaultValue={employee.bankAccount}
+                        autoComplete="off"
+                        aria-label={
+                          showBankAccount
+                            ? "เลขบัญชี"
+                            : "เลขบัญชี (ปกปิด)"
+                        }
+                        className="pr-11"
+                        onInput={(event) => {
+                          event.currentTarget.value =
+                            event.currentTarget.value.replace(/\D/g, "");
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowBankAccount((current) => !current)}
+                        className="absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        aria-label={
+                          showBankAccount
+                            ? "ซ่อนเลขบัญชี"
+                            : "แสดงเลขบัญชีเต็ม"
+                        }
+                        title={
+                          showBankAccount
+                            ? "ซ่อนเลขบัญชี"
+                            : "แสดงเลขบัญชีเต็ม"
+                        }
+                      >
+                        {showBankAccount ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </button>
+                    </div>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      ระบบจะเก็บเฉพาะตัวเลขและลบขีดหรือเว้นวรรคให้อัตโนมัติ
+                    </span>
                   </label>
                   <label className="field-label sm:col-span-2">
                     ชื่อบัญชี
