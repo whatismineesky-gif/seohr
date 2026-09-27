@@ -16,9 +16,12 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value ?? "";
   if (!/^[a-f0-9]{64}$/.test(token)) return null;
   const row = await getD1().prepare(`
-    SELECT u.id, u.username, e.email, e.legal_name, e.display_name
+    SELECT u.id, u.username, COALESCE(h.email, e.email) AS email,
+      COALESCE(h.display_name, e.legal_name) AS legal_name,
+      COALESCE(h.display_name, e.display_name) AS display_name
     FROM sessions s JOIN users u ON u.id = s.user_id
     LEFT JOIN employees e ON e.id = u.employee_id
+    LEFT JOIN hr_system_users h ON h.login_username = u.username COLLATE NOCASE
     WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.status = 'active'
     LIMIT 1
   `).bind(await sha256(token), new Date().toISOString()).first<Record<string, unknown>>();
