@@ -1045,8 +1045,11 @@ function EmployeeEditDialog({
                     เลขบัญชี
                     <Input
                       name="bankAccount"
+                      type="password"
                       inputMode="numeric"
                       defaultValue={employee.bankAccount}
+                      autoComplete="off"
+                      aria-label="เลขบัญชี (ปกปิด)"
                     />
                   </label>
                   <label className="field-label sm:col-span-2">
