@@ -37,7 +37,7 @@ function parseEmployee(
     employment: asText(payload.employment) || "FullTime",
     fullName: asText(payload.fullName),
     salary: asSalary(payload.salary),
-    bankAccount: asText(payload.bankAccount),
+    bankAccount: asText(payload.bankAccount).replace(/\D/g, ""),
     bankName: asText(payload.bankName),
     accountName: asText(payload.accountName),
     startDate: asText(payload.startDate),
