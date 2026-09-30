@@ -41,7 +41,7 @@ function normalize(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, "").toLowerCase();
 }
 
-export function WarningPanel() {
+export function WarningPanel({ canEdit }: { canEdit: boolean }) {
   const [month, setMonth] = useState(currentMonth);
   const [data, setData] = useState<WarningData | null>(null);
   const [rows, setRows] = useState<ResultRow[]>([]);
@@ -158,19 +158,22 @@ export function WarningPanel() {
     <Tabs defaultValue="records" className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TabsList><TabsTrigger value="records"><FileSpreadsheet /> บันทึกประจำเดือน</TabsTrigger><TabsTrigger value="quarter"><Trophy /> รวมฝากรายไตรมาส</TabsTrigger><TabsTrigger value="config"><Settings2 /> Config</TabsTrigger></TabsList>
-        <label className="field-label min-w-48">เดือนประเมิน<Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label>
+        <div className="flex flex-wrap items-center gap-3">
+          {!canEdit && <Badge variant="outline">ดูข้อมูลอย่างเดียว</Badge>}
+          <label className="field-label min-w-48">เดือนประเมิน<Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label>
+        </div>
       </div>
 
       <TabsContent value="records" className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-3"><section className="summary-card"><CheckCircle2 className="text-emerald-600" /><div><p className="text-sm text-muted-foreground">WINLOSS</p><strong className="text-2xl">{counts.winloss} คน</strong></div></section><section className="summary-card"><AlertTriangle className="text-amber-500" /><div><p className="text-sm text-muted-foreground">ใบเหลือง</p><strong className="text-2xl">{counts.yellow} คน</strong></div></section><section className="summary-card"><ShieldAlert className="text-rose-600" /><div><p className="text-sm text-muted-foreground">ใบแดง</p><strong className="text-2xl">{counts.red} คน</strong></div></section></div>
-        <section className="panel">
+        {canEdit && <section className="panel">
           <div className="panel-heading"><div><p className="section-kicker">IMPORT MONTHLY DEPOSIT</p><h2>นำเข้าจำนวนฝากของพนักงาน</h2><p className="mt-1 text-sm text-muted-foreground">รองรับ Excel หรือ CSV โดยใช้คอลัมน์ “รหัสพนักงาน” และ “จำนวนฝาก”</p></div><label><input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={importFile} /><Button asChild><span><Upload /> Import File</span></Button></label></div>
-        </section>
+        </section>}
         <section className="panel overflow-hidden p-0">
-          <div className="panel-heading px-6 pt-6"><div><p className="section-kicker">REVIEW BEFORE SAVE</p><h2>ตรวจสอบและแก้ไขยอดฝาก</h2></div><Button onClick={saveRows} disabled={saving || !rows.length}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกข้อมูล</Button></div>
+          <div className="panel-heading px-6 pt-6"><div><p className="section-kicker">REVIEW BEFORE SAVE</p><h2>{canEdit ? "ตรวจสอบและแก้ไขยอดฝาก" : "ข้อมูลผลประเมินประจำเดือน"}</h2></div>{canEdit && <Button onClick={saveRows} disabled={saving || !rows.length}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกข้อมูล</Button>}</div>
           <div className="mt-4 overflow-auto border-t"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>รหัส</TableHead><TableHead>พนักงาน</TableHead><TableHead>อายุงาน</TableHead><TableHead>จำนวนฝาก</TableHead><TableHead>MID / MIN</TableHead><TableHead>ผล</TableHead><TableHead className="text-right">จัดการ</TableHead></TableRow></TableHeader><TableBody>
             {!rows.length && <TableRow><TableCell colSpan={7} className="h-32 text-center text-muted-foreground">ยังไม่มีข้อมูล กรุณา Import File</TableCell></TableRow>}
-            {rows.map((item) => <TableRow key={item.employeeId}><TableCell>{item.employeeId}</TableCell><TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.team}</div></TableCell><TableCell>{item.tenureMonth} เดือน<div className="text-xs text-muted-foreground">ไตรมาส {item.tenureQuarter} · เดือนที่ {item.quarterMonth}</div></TableCell><TableCell><Input className="w-28" type="number" min="0" value={item.depositCount} onChange={(event) => updateDeposit(item.employeeId, Math.max(0, Number(event.target.value)))} /></TableCell><TableCell>MID {number.format(item.mid)}<div className="text-xs text-muted-foreground">MIN {number.format(item.min)}</div></TableCell><TableCell>{resultBadge(item.resultType)}</TableCell><TableCell className="text-right"><Button size="sm" variant="outline" onClick={() => saveOne(item)} disabled={saving}><Save /> บันทึก</Button><Button size="icon" variant="ghost" className="text-rose-600" aria-label="ลบ" onClick={() => setDeleteTarget(item)}><Trash2 /></Button></TableCell></TableRow>)}
+            {rows.map((item) => <TableRow key={item.employeeId}><TableCell>{item.employeeId}</TableCell><TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.team}</div></TableCell><TableCell>{item.tenureMonth} เดือน<div className="text-xs text-muted-foreground">ไตรมาส {item.tenureQuarter} · เดือนที่ {item.quarterMonth}</div></TableCell><TableCell><Input className="w-28" type="number" min="0" value={item.depositCount} disabled={!canEdit} onChange={(event) => updateDeposit(item.employeeId, Math.max(0, Number(event.target.value)))} /></TableCell><TableCell>MID {number.format(item.mid)}<div className="text-xs text-muted-foreground">MIN {number.format(item.min)}</div></TableCell><TableCell>{resultBadge(item.resultType)}</TableCell><TableCell className="text-right">{canEdit ? <><Button size="sm" variant="outline" onClick={() => saveOne(item)} disabled={saving}><Save /> บันทึก</Button><Button size="icon" variant="ghost" className="text-rose-600" aria-label="ลบ" onClick={() => setDeleteTarget(item)}><Trash2 /></Button></> : "—"}</TableCell></TableRow>)}
           </TableBody></Table></div>
         </section>
       </TabsContent>
@@ -186,8 +189,8 @@ export function WarningPanel() {
 
       <TabsContent value="config" className="space-y-5">
         <section className="rounded-xl border border-violet-200 bg-violet-50 p-5 text-sm text-violet-900">เกณฑ์คำนวณ: มากกว่า MID = WINLOSS, มากกว่า MIN แต่ไม่เกิน MID = ใบเหลือง, น้อยกว่าหรือเท่ากับ MIN = ใบแดง</section>
-        <section className="panel overflow-hidden p-0"><div className="panel-heading px-6 pt-6"><div><p className="section-kicker">WARNING CONFIG</p><h2>เกณฑ์ตามอายุงาน</h2></div><Button onClick={saveConfig} disabled={saving}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึก Config</Button></div><div className="mt-4 overflow-auto border-t"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>อายุงาน (เดือน)</TableHead><TableHead>MID</TableHead><TableHead>MIN</TableHead></TableRow></TableHeader><TableBody>
-          {configs.map((item, index) => <TableRow key={item.tenureMonth}><TableCell className="font-medium">{item.tenureMonth}</TableCell><TableCell><Input type="number" min="0" value={item.mid} onChange={(event) => setConfigs((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, mid: Number(event.target.value) } : row))} /></TableCell><TableCell><Input type="number" min="0" value={item.min} onChange={(event) => setConfigs((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, min: Number(event.target.value) } : row))} /></TableCell></TableRow>)}
+        <section className="panel overflow-hidden p-0"><div className="panel-heading px-6 pt-6"><div><p className="section-kicker">WARNING CONFIG</p><h2>เกณฑ์ตามอายุงาน</h2></div>{canEdit && <Button onClick={saveConfig} disabled={saving}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึก Config</Button>}</div><div className="mt-4 overflow-auto border-t"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>อายุงาน (เดือน)</TableHead><TableHead>MID</TableHead><TableHead>MIN</TableHead></TableRow></TableHeader><TableBody>
+          {configs.map((item, index) => <TableRow key={item.tenureMonth}><TableCell className="font-medium">{item.tenureMonth}</TableCell><TableCell><Input type="number" min="0" value={item.mid} disabled={!canEdit} onChange={(event) => setConfigs((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, mid: Number(event.target.value) } : row))} /></TableCell><TableCell><Input type="number" min="0" value={item.min} disabled={!canEdit} onChange={(event) => setConfigs((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, min: Number(event.target.value) } : row))} /></TableCell></TableRow>)}
         </TableBody></Table></div></section>
       </TabsContent>
     </Tabs>
