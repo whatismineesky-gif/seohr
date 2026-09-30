@@ -148,6 +148,82 @@ export async function createEmployee(input: SeedEmployee): Promise<EmployeeRecor
   return mapEmployee(row);
 }
 
+export async function importEmployees(inputs: SeedEmployee[]) {
+  await ensureEmployeesSeeded();
+  const database = getD1();
+  const existingResult = await database
+    .prepare("SELECT id FROM hr_employees")
+    .all<{ id: string }>();
+  const existingIds = new Set(existingResult.results.map((row) => String(row.id)));
+  const sequenceRow = await database
+    .prepare("SELECT COALESCE(MAX(sequence), 0) AS maximum FROM hr_employees")
+    .first<{ maximum: number }>();
+  let nextSequence = Number(sequenceRow?.maximum ?? 0) + 1;
+  const deduplicated = Array.from(
+    new Map(inputs.map((employee) => [employee.id, employee])).values(),
+  );
+  const added = deduplicated.filter((employee) => !existingIds.has(employee.id)).length;
+  const updated = deduplicated.length - added;
+  const sql = `
+    INSERT INTO hr_employees (
+      id, sequence, nickname, team, position, employment, full_name, salary,
+      bank_account, bank_name, account_name, start_date, end_date, aff, email,
+      discord_id, dynadot, referred_by, probation, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      nickname = excluded.nickname,
+      team = excluded.team,
+      position = excluded.position,
+      employment = excluded.employment,
+      full_name = excluded.full_name,
+      salary = excluded.salary,
+      bank_account = excluded.bank_account,
+      bank_name = excluded.bank_name,
+      account_name = excluded.account_name,
+      start_date = excluded.start_date,
+      end_date = excluded.end_date,
+      aff = excluded.aff,
+      email = excluded.email,
+      discord_id = excluded.discord_id,
+      dynadot = excluded.dynadot,
+      referred_by = excluded.referred_by,
+      probation = excluded.probation,
+      status = excluded.status,
+      updated_at = CURRENT_TIMESTAMP
+  `;
+  const statements = deduplicated.map((employee) => {
+    const sequence = existingIds.has(employee.id)
+      ? Math.max(0, employee.sequence)
+      : nextSequence++;
+    return database.prepare(sql).bind(
+      employee.id,
+      sequence,
+      employee.nickname,
+      employee.team,
+      employee.position,
+      employee.employment,
+      employee.fullName,
+      employee.salary,
+      employee.bankAccount,
+      employee.bankName,
+      employee.accountName,
+      employee.startDate,
+      employee.endDate,
+      employee.aff,
+      employee.email,
+      employee.discordId,
+      employee.dynadot,
+      employee.referredBy,
+      employee.probation,
+      employee.status,
+    );
+  });
+  for (let index = 0; index < statements.length; index += 40) {
+    await database.batch(statements.slice(index, index + 40));
+  }
+  return { added, updated, employees: await listEmployees() };
+}
+
 export async function updateEmployee(input: SeedEmployee): Promise<EmployeeRecord> {
   await ensureEmployeesSeeded();
   const row = await getD1().prepare(`
