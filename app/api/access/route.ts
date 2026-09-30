@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { ensureAttendanceSetup, type AuthUser } from "@/db/attendance";
-import { getAccessData, saveAccessUser } from "@/db/access";
+import {
+  createEmployeeUsersBulk,
+  getAccessData,
+  saveAccessUser,
+} from "@/db/access";
 
 async function resolveUser(request: NextRequest): Promise<AuthUser | null> {
   const authenticated = await getChatGPTUser();
@@ -22,7 +26,10 @@ export async function POST(request: NextRequest) {
   if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   try {
     const currentUser = await ensureAttendanceSetup(auth);
-    return NextResponse.json(await saveAccessUser(currentUser, await request.json() as Record<string, unknown>));
+    const payload = await request.json() as Record<string, unknown>;
+    if (payload.action === "bulk_create_employee_users")
+      return NextResponse.json(await createEmployeeUsersBulk(currentUser, payload));
+    return NextResponse.json(await saveAccessUser(currentUser, payload));
   } catch (error) {
     const message = error instanceof Error ? error.message : "บันทึกสิทธิ์ไม่สำเร็จ";
     return NextResponse.json({ error: message }, { status: message.includes("เฉพาะ HR") ? 403 : 400 });
