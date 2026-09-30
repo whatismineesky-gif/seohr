@@ -1,5 +1,6 @@
 import {
   createEmployee,
+  importEmployees,
   listEmployees,
   nextEmployeeSequence,
   updateEmployee,
@@ -77,6 +78,16 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
   try {
     const payload = (await request.json()) as Record<string, unknown>;
+    if (payload.action === "bulk_import") {
+      const rows = Array.isArray(payload.employees) ? payload.employees : [];
+      if (!rows.length) throw new Error("ไม่พบข้อมูลพนักงานสำหรับนำเข้า");
+      if (rows.length > 500)
+        throw new Error("นำเข้าได้สูงสุดครั้งละ 500 รายการ");
+      const employees = rows.map((row, index) =>
+        parseEmployee(row as Record<string, unknown>, index + 1),
+      );
+      return Response.json(await importEmployees(employees));
+    }
     const employee = parseEmployee(payload, await nextEmployeeSequence());
     return Response.json(
       { employee: await createEmployee(employee) },
