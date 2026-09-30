@@ -220,7 +220,7 @@ const viewTitles: Record<
   resignations: {
     eyebrow: "OFFBOARDING",
     title: "จัดการการลาออก",
-    description: "รวมรายการแจ้งลาออก ลาออกแล้ว และรอคัดชื่อออก",
+    description: "รวมรายการแจ้งลาออก กำลังรอคัดชื่อออก และลาออก",
   },
   advances: {
     eyebrow: "ADVANCE & INSTALLMENT",
@@ -311,7 +311,7 @@ function Dashboard({
     (employee) => employee.status === "แจ้งลาออก",
   ).length;
   const pendingRemoval = employees.filter(
-    (employee) => employee.status === "รอคัดชื่อออก",
+    (employee) => employee.status === "กำลังรอคัดชื่อออก",
   ).length;
   const salaryReady = activeEmployees.filter(
     (employee) => employee.hasSalary,
@@ -791,21 +791,21 @@ function Directory({
         <div className="grid gap-4 sm:grid-cols-3">
           <SummaryCard
             label="แจ้งลาออก"
-            value={`${hrData.summary.notice} คน`}
+            value={`${employees.filter((employee) => employee.status === "แจ้งลาออก").length} คน`}
             note="รอดำเนินการ"
             icon={UserMinus}
             tone="bg-amber-50 text-amber-700"
           />
           <SummaryCard
-            label="รอคัดชื่อออก"
-            value={`${hrData.summary.pendingRemoval} คน`}
+            label="กำลังรอคัดชื่อออก"
+            value={`${employees.filter((employee) => employee.status === "กำลังรอคัดชื่อออก").length} คน`}
             note="ตรวจสิทธิ์ระบบ"
             icon={AlertTriangle}
             tone="bg-rose-50 text-rose-700"
           />
           <SummaryCard
-            label="ลาออกแล้ว"
-            value={`${hrData.summary.departed} คน`}
+            label="ลาออก"
+            value={`${employees.filter((employee) => employee.status === "ลาออก").length} คน`}
             note="เก็บในประวัติ"
             icon={CheckCircle2}
             tone="bg-slate-100 text-slate-700"
