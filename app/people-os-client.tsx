@@ -177,6 +177,12 @@ const formatMoney = new Intl.NumberFormat("th-TH", {
   currency: "THB",
   maximumFractionDigits: 0,
 });
+const currentThaiDate = new Intl.DateTimeFormat("th-TH", {
+  timeZone: "Asia/Bangkok",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+}).format(new Date());
 
 const navItems = [
   { id: "dashboard" as View, label: "ภาพรวม", icon: LayoutDashboard },
@@ -2291,7 +2297,7 @@ export default function PeopleOSClient() {
               <Menu />
             </SidebarTrigger>
             <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
-              <CalendarDays className="size-4" /> ข้อมูล ณ 22 กันยายน 2569
+              <CalendarDays className="size-4" /> ข้อมูล ณ {currentThaiDate}
             </div>
           </div>
           <div className="flex items-center gap-2">
