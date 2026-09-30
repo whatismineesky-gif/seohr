@@ -5,6 +5,34 @@ import {
   saveWarningRows,
 } from "@/db/warnings";
 import { requireApiUser } from "@/app/api/auth";
+import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { ensureAttendanceSetup, type AuthUser } from "@/db/attendance";
+
+async function requireHr(request: Request) {
+  const authenticated = await getChatGPTUser();
+  const hostname = new URL(request.url).hostname;
+  const auth: AuthUser | null = authenticated
+    ? {
+        userId: authenticated.userId,
+        email: authenticated.email,
+        displayName: authenticated.displayName,
+      }
+    : ["localhost", "127.0.0.1", "terminal.local"].includes(hostname)
+      ? {
+          userId: "local-qa",
+          email: "qa@local.test",
+          displayName: "Local HR",
+        }
+      : null;
+  if (!auth) return Response.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  const user = await ensureAttendanceSetup(auth);
+  return user.role === "hr"
+    ? null
+    : Response.json(
+        { error: "เฉพาะ HR เท่านั้นที่แก้ไขข้อมูลใบเตือนได้" },
+        { status: 403 },
+      );
+}
 
 function fail(error: unknown) {
   return Response.json(
@@ -14,7 +42,7 @@ function fail(error: unknown) {
 }
 
 export async function DELETE(request: Request) {
-  const unauthorized = await requireApiUser(request);
+  const unauthorized = await requireHr(request);
   if (unauthorized) return unauthorized;
   try {
     return Response.json(
@@ -40,7 +68,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await requireApiUser(request);
+  const unauthorized = await requireHr(request);
   if (unauthorized) return unauthorized;
   try {
     const body = (await request.json()) as Record<string, unknown>;
