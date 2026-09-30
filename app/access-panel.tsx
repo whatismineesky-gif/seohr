@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import {
   Check,
+  Download,
   Loader2,
   Pencil,
   Save,
   Search,
   ShieldCheck,
   UserCog,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -37,7 +39,13 @@ type UserRow = {
   permissions: string[];
   loginUsername: string;
 };
-type Employee = { id: string; nickname: string; team: string; email: string };
+type Employee = {
+  id: string;
+  nickname: string;
+  team: string;
+  email: string;
+  status: string;
+};
 type AccessData = {
   currentUser: { email: string; role: Role };
   users: UserRow[];
@@ -78,6 +86,9 @@ export function AccessPanel({
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("permissions");
   const [search, setSearch] = useState("");
+  const [bulkSearch, setBulkSearch] = useState("");
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [form, setForm] = useState({
     email: "",
     loginUsername: "",
@@ -169,6 +180,77 @@ export function AccessPanel({
     }
   }
 
+  async function downloadCredentials(
+    rows: Array<{
+      employeeId: string;
+      nickname: string;
+      team: string;
+      username: string;
+      password: string;
+    }>,
+  ) {
+    const XLSX = await import("xlsx");
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ["รหัสพนักงาน", "ชื่อเล่น", "ทีม", "Username", "รหัสผ่านเริ่มต้น", "สิทธิ์"],
+      ...rows.map((row) => [
+        row.employeeId,
+        row.nickname,
+        row.team,
+        row.username,
+        row.password,
+        "ลงเวลางาน",
+      ]),
+    ]);
+    worksheet["!cols"] = [14, 18, 14, 20, 22, 18].map((wch) => ({ wch }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "ข้อมูลเข้าสู่ระบบ");
+    XLSX.writeFile(workbook, `employee-login-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  async function createUsersBulk() {
+    if (!selectedEmployeeIds.length || bulkSaving) return;
+    setBulkSaving(true);
+    try {
+      const response = await fetch("/api/access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_create_employee_users",
+          employeeIds: selectedEmployeeIds,
+        }),
+      });
+      const result = (await response.json()) as {
+        created?: Array<{
+          employeeId: string;
+          nickname: string;
+          team: string;
+          username: string;
+          password: string;
+        }>;
+        skipped?: Array<{ employeeId: string; reason: string }>;
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "สร้าง User แบบกลุ่มไม่สำเร็จ");
+      const created = result.created ?? [];
+      if (created.length) await downloadCredentials(created);
+      toast.success(`สร้าง User สำเร็จ ${created.length} คน`, {
+        description: result.skipped?.length
+          ? `ข้าม ${result.skipped.length} คน เนื่องจากมีบัญชีแล้วหรือข้อมูลไม่พร้อม`
+          : "ดาวน์โหลดไฟล์ Username และรหัสผ่านแล้ว",
+      });
+      setSelectedEmployeeIds([]);
+      await load();
+      onAccessChanged();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "สร้าง User แบบกลุ่มไม่สำเร็จ",
+      );
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
   if (loading)
     return (
       <section className="panel flex min-h-64 items-center justify-center">
@@ -191,6 +273,25 @@ export function AccessPanel({
       .filter(Boolean)
       .some((value) => value.toLocaleLowerCase("th-TH").includes(searchTerm));
   });
+  const linkedEmployeeIds = new Set(
+    data.users.map((user) => user.employeeId).filter(Boolean),
+  );
+  const bulkSearchTerm = bulkSearch.trim().toLocaleLowerCase("th-TH");
+  const availableEmployees = data.employees.filter((employee) => {
+    if (employee.status === "ลาออก" || linkedEmployeeIds.has(employee.id))
+      return false;
+    if (!bulkSearchTerm) return true;
+    return [employee.id, employee.nickname, employee.team, employee.status]
+      .filter(Boolean)
+      .some((value) =>
+        value.toLocaleLowerCase("th-TH").includes(bulkSearchTerm),
+      );
+  });
+  const allVisibleSelected =
+    availableEmployees.length > 0 &&
+    availableEmployees.every((employee) =>
+      selectedEmployeeIds.includes(employee.id),
+    );
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
@@ -200,6 +301,9 @@ export function AccessPanel({
         </TabsTrigger>
         <TabsTrigger value="users">
           <Users /> ผู้ใช้งานในระบบ
+        </TabsTrigger>
+        <TabsTrigger value="bulk-users">
+          <UserPlus /> สร้าง User แบบกลุ่ม
         </TabsTrigger>
       </TabsList>
 
@@ -323,6 +427,125 @@ export function AccessPanel({
             {saving ? <Loader2 className="animate-spin" /> : <Save />}{" "}
             {saving ? "กำลังบันทึก..." : "บันทึกสิทธิ์ผู้ใช้งาน"}
           </Button>
+        </section>
+      </TabsContent>
+
+      <TabsContent value="bulk-users">
+        <section className="panel overflow-hidden p-0">
+          <div className="panel-heading gap-4 px-6 pt-6">
+            <div>
+              <p className="section-kicker">BULK USER CREATION</p>
+              <h2>สร้าง User พนักงานแบบกลุ่ม</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Username ใช้รหัสพนักงาน ระบบจะสุ่มรหัสผ่านเฉพาะบุคคล
+                และให้สิทธิ์เฉพาะเมนูลงเวลางาน
+              </p>
+            </div>
+            <div className="relative w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="pl-9"
+                value={bulkSearch}
+                onChange={(event) => setBulkSearch(event.target.value)}
+                placeholder="ค้นหารหัส ชื่อ หรือทีม"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-y bg-slate-50 px-6 py-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={() => {
+                  const visibleIds = availableEmployees.map((item) => item.id);
+                  setSelectedEmployeeIds((current) =>
+                    allVisibleSelected
+                      ? current.filter((id) => !visibleIds.includes(id))
+                      : Array.from(new Set([...current, ...visibleIds])),
+                  );
+                }}
+                className="size-4 accent-indigo-600"
+              />
+              เลือกทั้งหมดที่แสดง ({availableEmployees.length} คน)
+            </label>
+            <Badge variant="outline">
+              เลือกแล้ว {selectedEmployeeIds.length} คน
+            </Badge>
+          </div>
+          <div className="max-h-[55vh] overflow-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-white">
+                <TableRow>
+                  <TableHead className="w-14">เลือก</TableHead>
+                  <TableHead>พนักงาน</TableHead>
+                  <TableHead>ทีม</TableHead>
+                  <TableHead>สถานะ</TableHead>
+                  <TableHead>Username ที่จะสร้าง</TableHead>
+                  <TableHead>สิทธิ์</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {availableEmployees.map((employee) => {
+                  const selected = selectedEmployeeIds.includes(employee.id);
+                  return (
+                    <TableRow key={employee.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() =>
+                            setSelectedEmployeeIds((current) =>
+                              selected
+                                ? current.filter((id) => id !== employee.id)
+                                : [...current, employee.id],
+                            )
+                          }
+                          className="size-4 accent-indigo-600"
+                          aria-label={`เลือก ${employee.nickname}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <strong>{employee.nickname}</strong>
+                        <div className="text-xs text-muted-foreground">
+                          {employee.id}
+                        </div>
+                      </TableCell>
+                      <TableCell>{employee.team}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{employee.status}</Badge>
+                      </TableCell>
+                      <TableCell className="font-mono">{employee.id}</TableCell>
+                      <TableCell>
+                        <Badge className="bg-violet-600">ลงเวลางาน</Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!availableEmployees.length && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                      ไม่พบพนักงานที่ยังไม่มี User
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-5">
+            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+              ไฟล์รหัสผ่านจะดาวน์โหลดเพียงครั้งเดียวหลังสร้างสำเร็จ
+              กรุณาเก็บไฟล์ให้ปลอดภัยและส่งรหัสให้พนักงานเป็นรายบุคคล
+            </p>
+            <Button
+              onClick={() => void createUsersBulk()}
+              disabled={!selectedEmployeeIds.length || bulkSaving}
+            >
+              {bulkSaving ? <Loader2 className="animate-spin" /> : <Download />}
+              {bulkSaving
+                ? "กำลังสร้าง User..."
+                : `สร้าง ${selectedEmployeeIds.length} User และดาวน์โหลดไฟล์`}
+            </Button>
+          </div>
         </section>
       </TabsContent>
 
