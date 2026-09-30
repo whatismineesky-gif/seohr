@@ -213,7 +213,7 @@ export async function getAttendanceData(
   const employeesResult = await database
     .prepare(
       `
-    SELECT id, nickname, team, status, email, end_date
+    SELECT id, nickname, team, position, status, email, end_date
     FROM hr_employees
     WHERE (start_date = '' OR
       CASE WHEN start_date GLOB '??/??/????'
@@ -232,6 +232,7 @@ export async function getAttendanceData(
     id: String(row.id),
     nickname: String(row.nickname),
     team: String(row.team),
+    position: String(row.position ?? ""),
     status: String(row.status),
     endDate: String(row.end_date ?? ""),
     email: String(row.email ?? ""),
