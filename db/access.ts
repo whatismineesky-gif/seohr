@@ -57,7 +57,7 @@ export async function getAccessData(auth: AuthUser) {
     .bind(currentUser.email).first<Record<string, unknown>>();
   const permissions = parsePermissions(current?.menu_permissions, currentUser.role);
   const employees = currentUser.role === "hr" ? (await database.prepare(`
-    SELECT id, nickname, team, email FROM hr_employees ORDER BY sequence, id
+    SELECT id, nickname, team, email, status FROM hr_employees ORDER BY sequence, id
   `).all<Record<string, unknown>>()).results : [];
   const users = currentUser.role === "hr" ? (await database.prepare(`
     SELECT u.email, u.display_name, u.role, u.employee_id, u.menu_permissions,
@@ -130,4 +130,154 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
       updated_at = CURRENT_TIMESTAMP
   `).bind(email, email, userRole, employeeId, JSON.stringify(permissions), loginUsername).run();
   return { ok: true };
+}
+
+
+function temporaryPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+export async function createEmployeeUsersBulk(
+  currentUser: SystemUser,
+  input: Record<string, unknown>,
+) {
+  if (currentUser.role !== "hr")
+    throw new Error("เฉพาะ HR เท่านั้นที่สร้างผู้ใช้งานแบบกลุ่มได้");
+  const requestedIds = Array.isArray(input.employeeIds)
+    ? Array.from(
+        new Set(input.employeeIds.map(String).map((id) => id.trim()).filter(Boolean)),
+      )
+    : [];
+  if (!requestedIds.length) throw new Error("กรุณาเลือกพนักงานอย่างน้อย 1 คน");
+  if (requestedIds.length > 500)
+    throw new Error("สร้างผู้ใช้งานได้สูงสุดครั้งละ 500 คน");
+
+  const database = getD1();
+  const [employeeResult, accessResult, accountResult, legacyResult] =
+    await database.batch([
+      database.prepare(
+        "SELECT id, nickname, team, email, status FROM hr_employees ORDER BY sequence, id",
+      ),
+      database.prepare(
+        "SELECT email, employee_id, login_username FROM hr_system_users",
+      ),
+      database.prepare("SELECT username FROM users"),
+      database.prepare("SELECT id, employee_code FROM employees"),
+    ]);
+  const requested = new Set(requestedIds);
+  const employees = employeeResult.results.filter((row) =>
+    requested.has(String(row.id)),
+  );
+  const existingEmployeeIds = new Set(
+    accessResult.results
+      .map((row) => String(row.employee_id ?? ""))
+      .filter(Boolean),
+  );
+  const existingEmails = new Set(
+    accessResult.results.map((row) => String(row.email ?? "").toLowerCase()),
+  );
+  const existingUsernames = new Set([
+    ...accessResult.results.map((row) =>
+      String(row.login_username ?? "").toLowerCase(),
+    ),
+    ...accountResult.results.map((row) =>
+      String(row.username ?? "").toLowerCase(),
+    ),
+  ]);
+  const legacyByCode = new Map(
+    legacyResult.results.map((row) => [
+      String(row.employee_code ?? ""),
+      String(row.id ?? ""),
+    ]),
+  );
+  const created: Array<{
+    employeeId: string;
+    nickname: string;
+    team: string;
+    username: string;
+    password: string;
+  }> = [];
+  const skipped: Array<{ employeeId: string; reason: string }> = [];
+  const statements = [];
+  const foundIds = new Set(employees.map((row) => String(row.id)));
+
+  for (const employeeId of requestedIds) {
+    if (!foundIds.has(employeeId))
+      skipped.push({ employeeId, reason: "ไม่พบข้อมูลพนักงาน" });
+  }
+
+  for (const employee of employees) {
+    const employeeId = String(employee.id);
+    const username = employeeId;
+    if (existingEmployeeIds.has(employeeId)) {
+      skipped.push({ employeeId, reason: "มี User เชื่อมกับพนักงานแล้ว" });
+      continue;
+    }
+    if (!/^[A-Za-z0-9._-]{3,50}$/.test(username)) {
+      skipped.push({ employeeId, reason: "รหัสพนักงานใช้เป็น Username ไม่ได้" });
+      continue;
+    }
+    if (existingUsernames.has(username.toLowerCase())) {
+      skipped.push({ employeeId, reason: "Username มีอยู่ในระบบแล้ว" });
+      continue;
+    }
+    const employeeEmail = String(employee.email ?? "").trim().toLowerCase();
+    const email = employeeEmail.includes("@")
+      ? employeeEmail
+      : `${username.toLowerCase()}@people-os.local`;
+    if (existingEmails.has(email)) {
+      skipped.push({ employeeId, reason: "อีเมลมี User อยู่แล้ว" });
+      continue;
+    }
+    const password = temporaryPassword();
+    const userId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    statements.push(
+      database
+        .prepare(
+          `INSERT INTO users (id, employee_id, username, password_hash, status,
+            failed_login_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'active', 0, ?, ?)`,
+        )
+        .bind(
+          userId,
+          legacyByCode.get(employeeId) || null,
+          username,
+          await hashPassword(password),
+          now,
+          now,
+        ),
+      database
+        .prepare(
+          `INSERT INTO hr_system_users (
+            email, user_id, display_name, role, employee_id,
+            menu_permissions, login_username
+          ) VALUES (?, ?, ?, 'employee', ?, ?, ?)`,
+        )
+        .bind(
+          email,
+          userId,
+          String(employee.nickname || employeeId),
+          employeeId,
+          JSON.stringify(["attendance"]),
+          username,
+        ),
+    );
+    existingEmployeeIds.add(employeeId);
+    existingEmails.add(email);
+    existingUsernames.add(username.toLowerCase());
+    created.push({
+      employeeId,
+      nickname: String(employee.nickname || ""),
+      team: String(employee.team || ""),
+      username,
+      password,
+    });
+  }
+
+  for (let index = 0; index < statements.length; index += 40)
+    await database.batch(statements.slice(index, index + 40));
+  return { created, skipped };
 }
