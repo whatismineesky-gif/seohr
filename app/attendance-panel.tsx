@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   CalendarCheck2,
@@ -116,6 +123,12 @@ type AttendanceData = {
     actorRole: Role;
     createdAt: string;
   }>;
+  auditPagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    pageCount: number;
+  };
   rules: Rule[];
   summary: {
     plannedWorkingDays: number;
@@ -132,13 +145,6 @@ type AttendanceData = {
     absenceDeduction: number;
     totalDeduction: number;
   };
-  users: Array<{
-    email: string;
-    display_name: string;
-    role: Role;
-    employee_id: string | null;
-    nickname: string | null;
-  }>;
 };
 
 type Rule = {
@@ -346,10 +352,12 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
 export function AttendancePanel() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [auditPage, setAuditPage] = useState(1);
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
   const [data, setData] = useState<AttendanceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [recordDate, setRecordDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
@@ -373,15 +381,30 @@ export function AttendancePanel() {
     try {
       const params = new URLSearchParams({ month });
       if (selectedEmployeeId) params.set("employeeId", selectedEmployeeId);
-      const response = await fetch(`/api/attendance?${params}`, {
-        cache: "no-store",
-      });
+      params.set("auditPage", String(auditPage));
+      let response: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          response = await fetch(`/api/attendance?${params}`, {
+            cache: "no-store",
+          });
+          if (![429, 502, 503, 504].includes(response.status)) break;
+        } catch (error) {
+          if (attempt === 2) throw error;
+        }
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, 150 * (attempt + 1)),
+        );
+      }
+      if (!response) throw new Error("ไม่สามารถเชื่อมต่อระบบลงเวลาได้");
       const result = (await response.json()) as AttendanceData & {
         error?: string;
       };
       if (!response.ok)
         throw new Error(result.error || "โหลดข้อมูลลงเวลาไม่สำเร็จ");
       setData(result);
+      if (result.auditPagination.page !== auditPage)
+        setAuditPage(result.auditPagination.page);
       if (!selectedEmployeeId && result.selectedEmployeeId)
         setSelectedEmployeeId(result.selectedEmployeeId);
       if (
@@ -396,7 +419,7 @@ export function AttendancePanel() {
     } finally {
       setLoading(false);
     }
-  }, [month, selectedEmployeeId]);
+  }, [month, selectedEmployeeId, auditPage]);
 
   useEffect(() => {
     const task = window.setTimeout(() => {
@@ -417,6 +440,8 @@ export function AttendancePanel() {
     : allowedTypes[0];
 
   async function post(body: Record<string, unknown>, success: string) {
+    if (savingRef.current) return false;
+    savingRef.current = true;
     setSaving(true);
     try {
       const response = await fetch("/api/attendance", {
@@ -433,6 +458,7 @@ export function AttendancePanel() {
       toast.error(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ");
       return false;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -458,7 +484,8 @@ export function AttendancePanel() {
 
   async function saveRecordEdit(event: FormEvent) {
     event.preventDefault();
-    if (!editingRecord) return;
+    if (!editingRecord || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const response = await fetch("/api/attendance", {
@@ -476,12 +503,14 @@ export function AttendancePanel() {
         error instanceof Error ? error.message : "แก้ไขรายการไม่สำเร็จ",
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
 
   async function removeRecord() {
-    if (!deleteRecord) return;
+    if (!deleteRecord || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       const response = await fetch("/api/attendance", {
@@ -497,6 +526,7 @@ export function AttendancePanel() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "ลบรายการไม่สำเร็จ");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -572,6 +602,7 @@ export function AttendancePanel() {
             value={month}
             onChange={(event) => {
               setMonth(event.target.value);
+              setAuditPage(1);
               setRecordDate(`${event.target.value}-01`);
             }}
           />
@@ -627,6 +658,7 @@ export function AttendancePanel() {
                               value={`${employee.id} ${employee.nickname} ${employee.team}`}
                               onSelect={() => {
                                 setSelectedEmployeeId(employee.id);
+                                setAuditPage(1);
                                 setEmployeePickerOpen(false);
                               }}
                             >
@@ -975,6 +1007,42 @@ export function AttendancePanel() {
               )}
             </TableBody>
           </Table>
+          {data.auditPagination.pageCount > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3">
+              <p className="text-sm text-slate-500">
+                ประวัติ {data.auditPagination.total} รายการ · หน้า {data.auditPagination.page}/
+                {data.auditPagination.pageCount}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={data.auditPagination.page <= 1}
+                  onClick={() =>
+                    setAuditPage((current) => Math.max(1, current - 1))
+                  }
+                >
+                  ก่อนหน้า
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    data.auditPagination.page >= data.auditPagination.pageCount
+                  }
+                  onClick={() =>
+                    setAuditPage((current) =>
+                      Math.min(data.auditPagination.pageCount, current + 1),
+                    )
+                  }
+                >
+                  ถัดไป
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </TabsContent>
 
