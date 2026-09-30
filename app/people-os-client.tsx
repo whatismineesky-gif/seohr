@@ -35,6 +35,7 @@ import {
   Settings2,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   UserMinus,
   UserRoundCheck,
   Users,
@@ -46,6 +47,16 @@ import { toast } from "sonner";
 import hrData from "./hr-data.json";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -642,12 +653,14 @@ function Directory({
   onAdd,
   onImport,
   onEmployeeSaved,
+  onEmployeeDeleted,
 }: {
   employees: Employee[];
   mode: "all" | "members" | "resignations";
   onAdd: () => void;
   onImport: () => void;
   onEmployeeSaved: (employee: Employee) => void;
+  onEmployeeDeleted: (employeeId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [team, setTeam] = useState("all");
@@ -921,6 +934,10 @@ function Directory({
           onEmployeeSaved(employee);
           setSelected(employee);
         }}
+        onDeleted={(employeeId) => {
+          onEmployeeDeleted(employeeId);
+          setSelected(null);
+        }}
       />
     </div>
   );
@@ -931,13 +948,17 @@ function EmployeeEditDialog({
   open,
   onOpenChange,
   onSaved,
+  onDeleted,
 }: {
   employee: Employee | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: (employee: Employee) => void;
+  onDeleted: (employeeId: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState("");
   const [showBankAccount, setShowBankAccount] = useState(false);
 
@@ -1009,6 +1030,38 @@ function EmployeeEditDialog({
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function removeEmployee() {
+    if (!employee || deleting) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/employees", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: employee.id }),
+      });
+      const result = (await response.json()) as {
+        employee?: { id: string; nickname: string };
+        error?: string;
+      };
+      if (!response.ok || !result.employee)
+        throw new Error(result.error || "ลบข้อมูลพนักงานไม่สำเร็จ");
+      toast.success(`ลบ ${result.employee.nickname} แล้ว`);
+      setDeleteOpen(false);
+      onDeleted(result.employee.id);
+      onOpenChange(false);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "ลบข้อมูลพนักงานไม่สำเร็จ",
+      );
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -1278,6 +1331,15 @@ function EmployeeEditDialog({
             <DialogFooter className="mt-6 border-t pt-4">
               <Button
                 type="button"
+                variant="destructive"
+                onClick={() => setDeleteOpen(true)}
+                disabled={saving || deleting}
+                className="sm:mr-auto"
+              >
+                <Trash2 /> ลบพนักงาน
+              </Button>
+              <Button
+                type="button"
                 variant="outline"
                 onClick={() => onOpenChange(false)}
                 disabled={saving}
@@ -1289,6 +1351,38 @@ function EmployeeEditDialog({
                 {saving ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
               </Button>
             </DialogFooter>
+            <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    ยืนยันลบ {employee.nickname}?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    ระบบจะลบข้อมูลพนักงาน รวมถึงประวัติลงเวลา รายการเบิก
+                    ใบเตือน ผลฝาก และข้อมูลเงินเดือนของพนักงานรายนี้ทั้งหมด
+                    บัญชีผู้ใช้ที่เชื่อมไว้จะถูกยกเลิกการเชื่อมโยง การดำเนินการนี้ย้อนกลับไม่ได้
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>ยกเลิก</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void removeEmployee();
+                    }}
+                    disabled={deleting}
+                    className="bg-rose-600 text-white hover:bg-rose-700"
+                  >
+                    {deleting ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Trash2 />
+                    )}
+                    {deleting ? "กำลังลบ..." : "ยืนยันลบข้อมูล"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </form>
         )}
       </DialogContent>
@@ -2060,6 +2154,12 @@ export default function PeopleOSClient() {
     );
   }
 
+  function removeEmployeeFromList(employeeId: string) {
+    setEmployees((current) =>
+      current.filter((employee) => employee.id !== employeeId),
+    );
+  }
+
   async function addEmployee(employee: Partial<Employee>) {
     const response = await fetch("/api/employees", {
       method: "POST",
@@ -2212,6 +2312,7 @@ export default function PeopleOSClient() {
               onAdd={() => setAddOpen(true)}
               onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
+              onEmployeeDeleted={removeEmployeeFromList}
             />
           )}
           {!accessLoading && access && view === "members" && (
@@ -2221,6 +2322,7 @@ export default function PeopleOSClient() {
               onAdd={() => setAddOpen(true)}
               onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
+              onEmployeeDeleted={removeEmployeeFromList}
             />
           )}
           {!accessLoading && access && view === "attendance" && (
@@ -2233,6 +2335,7 @@ export default function PeopleOSClient() {
               onAdd={() => setAddOpen(true)}
               onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
+              onEmployeeDeleted={removeEmployeeFromList}
             />
           )}
           {!accessLoading && access && view === "advances" && (
