@@ -1670,6 +1670,7 @@ function EmployeeImportDialog({
   onImported: (employees: Employee[]) => void;
 }) {
   const [fileName, setFileName] = useState("");
+  const [sheetName, setSheetName] = useState("");
   const [rows, setRows] = useState<ImportEmployee[]>([]);
   const [errors, setErrors] = useState<Array<{ row: number; message: string }>>(
     [],
@@ -1680,6 +1681,7 @@ function EmployeeImportDialog({
     onOpenChange(nextOpen);
     if (!nextOpen) {
       setFileName("");
+      setSheetName("");
       setRows([]);
       setErrors([]);
     }
@@ -1693,12 +1695,49 @@ function EmployeeImportDialog({
         throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 10 MB");
       const XLSX = await import("xlsx");
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      if (!sheet) throw new Error("ไม่พบชีตข้อมูลในไฟล์");
-      const imported = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: "",
-        raw: false,
+      const candidates = workbook.SheetNames.flatMap((name, sheetIndex) => {
+        const candidateSheet = workbook.Sheets[name];
+        if (!candidateSheet) return [];
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(candidateSheet, {
+          header: 1,
+          defval: "",
+          raw: false,
+        });
+        const headerRow = matrix.slice(0, 30).findIndex((row) => {
+          const headers = new Set(
+            (Array.isArray(row) ? row : []).map(normalizeImportHeader),
+          );
+          return (
+            headers.has(normalizeImportHeader("รหัสพนักงาน")) &&
+            headers.has(normalizeImportHeader("ชื่อเล่น")) &&
+            headers.has(normalizeImportHeader("ทีม"))
+          );
+        });
+        if (headerRow < 0) return [];
+        const headers = new Set(
+          (matrix[headerRow] ?? []).map(normalizeImportHeader),
+        );
+        const normalizedName = normalizeImportHeader(name);
+        const score =
+          (normalizedName.includes("dataรายชื่อพนักงาน") ? 100 : 0) +
+          (headers.has(normalizeImportHeader("สถานะพนักงาน")) ? 20 : 0) +
+          (headers.has(normalizeImportHeader("สถานะทดลองงาน")) ? 5 : 0) -
+          sheetIndex;
+        return [{ name, sheet: candidateSheet, headerRow, score }];
       });
+      const selected = candidates.sort((a, b) => b.score - a.score)[0];
+      if (!selected)
+        throw new Error(
+          "ไม่พบชีตข้อมูลพนักงานที่มีคอลัมน์รหัสพนักงาน ชื่อเล่น และทีม",
+        );
+      const imported = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+        selected.sheet,
+        {
+          defval: "",
+          raw: false,
+          range: selected.headerRow,
+        },
+      );
       if (!imported.length) throw new Error("ไฟล์ไม่มีข้อมูลพนักงาน");
 
       const current = new Map(employees.map((item) => [item.id, item]));
@@ -1707,7 +1746,7 @@ function EmployeeImportDialog({
       const nextErrors: Array<{ row: number; message: string }> = [];
 
       imported.slice(0, 500).forEach((row, index) => {
-        const rowNumber = index + 2;
+        const rowNumber = index + selected.headerRow + 2;
         const id = importText(
           importCell(row, ["รหัสพนักงาน", "รหัส", "employee id", "employee_id", "id"]),
         );
@@ -1784,10 +1823,12 @@ function EmployeeImportDialog({
       if (imported.length > 500)
         nextErrors.push({ row: 502, message: "ไฟล์เกิน 500 รายการ ระบบอ่านเฉพาะ 500 รายการแรก" });
       setFileName(file.name);
+      setSheetName(selected.name);
       setRows(nextRows);
       setErrors(nextErrors);
       if (!nextRows.length) throw new Error("ไม่พบแถวที่พร้อมนำเข้า");
     } catch (error) {
+      setSheetName("");
       setRows([]);
       toast.error(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
     } finally {
@@ -1870,7 +1911,8 @@ function EmployeeImportDialog({
           <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
             <strong>{fileName}</strong>
             <p className="mt-1 text-slate-500">
-              พร้อมนำเข้า {rows.length} รายการ · ต้องตรวจสอบ {errors.length} รายการ
+              ชีตที่อ่าน: {sheetName} · พร้อมนำเข้า {rows.length} รายการ ·
+              ต้องตรวจสอบ {errors.length} รายการ
             </p>
           </div>
         )}
@@ -1883,6 +1925,7 @@ function EmployeeImportDialog({
                   <TableHead>ชื่อเล่น</TableHead>
                   <TableHead>ทีม</TableHead>
                   <TableHead>ตำแหน่ง</TableHead>
+                  <TableHead>สถานะพนักงาน</TableHead>
                   <TableHead>การดำเนินการ</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1893,6 +1936,7 @@ function EmployeeImportDialog({
                     <TableCell>{row.nickname}</TableCell>
                     <TableCell>{row.team}</TableCell>
                     <TableCell>{row.position}</TableCell>
+                    <TableCell>{row.status}</TableCell>
                     <TableCell>
                       <Badge variant="outline">
                         {employees.some((item) => item.id === row.id)
