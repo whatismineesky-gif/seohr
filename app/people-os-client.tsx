@@ -1068,6 +1068,7 @@ function EmployeeEditDialog({
                       defaultValue={employee.position}
                     >
                       <option>Staff</option>
+                      <option>Parttime</option>
                       <option>Senior-staff</option>
                       <option>Head</option>
                       <option>HEAD</option>
@@ -1550,6 +1551,7 @@ function AddEmployeeDialog({
               ตำแหน่ง
               <select name="position" className="native-select">
                 <option>Staff</option>
+                <option>Parttime</option>
                 <option>Senior-staff</option>
                 <option>Head</option>
               </select>
