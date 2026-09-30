@@ -1,6 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -32,6 +38,7 @@ import {
   UserMinus,
   UserRoundCheck,
   Users,
+  Upload,
   WalletCards,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -633,11 +640,13 @@ function Directory({
   employees,
   mode,
   onAdd,
+  onImport,
   onEmployeeSaved,
 }: {
   employees: Employee[];
   mode: "all" | "members" | "resignations";
   onAdd: () => void;
+  onImport: () => void;
   onEmployeeSaved: (employee: Employee) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -851,9 +860,14 @@ function Directory({
               <Download /> ส่งออก CSV
             </Button>
             {mode === "all" && (
-              <Button onClick={onAdd}>
-                <Plus /> เพิ่มพนักงาน
-              </Button>
+              <>
+                <Button variant="outline" onClick={onImport}>
+                  <Upload /> นำเข้าไฟล์
+                </Button>
+                <Button onClick={onAdd}>
+                  <Plus /> เพิ่มพนักงาน
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -1468,6 +1482,367 @@ function DataQuality() {
   );
 }
 
+type ImportEmployee = Pick<
+  Employee,
+  | "id"
+  | "sequence"
+  | "nickname"
+  | "team"
+  | "position"
+  | "employment"
+  | "fullName"
+  | "salary"
+  | "bankAccount"
+  | "bankName"
+  | "accountName"
+  | "startDate"
+  | "endDate"
+  | "aff"
+  | "email"
+  | "discordId"
+  | "dynadot"
+  | "referredBy"
+  | "probation"
+  | "status"
+>;
+
+const employeeImportHeaders = [
+  "รหัสพนักงาน",
+  "ชื่อเล่น",
+  "ชื่อ-นามสกุล",
+  "ทีม",
+  "ตำแหน่ง",
+  "ประเภทการจ้าง",
+  "เงินเดือน",
+  "ธนาคาร",
+  "เลขบัญชี",
+  "ชื่อบัญชี",
+  "วันที่เริ่มงาน",
+  "วันที่ออกงาน",
+  "AFF",
+  "อีเมล",
+  "Discord ID",
+  "Dynadot",
+  "ผู้แนะนำ",
+  "สถานะทดลองงาน",
+  "สถานะพนักงาน",
+];
+
+function normalizeImportHeader(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-–—./()]+/g, "");
+}
+
+function importCell(
+  row: Record<string, unknown>,
+  aliases: string[],
+): unknown {
+  const accepted = new Set(aliases.map(normalizeImportHeader));
+  const key = Object.keys(row).find((item) =>
+    accepted.has(normalizeImportHeader(item)),
+  );
+  return key ? row[key] : "";
+}
+
+function importText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function importDate(value: unknown) {
+  const text = importText(value);
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const matched = text.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})$/);
+  if (matched) {
+    let year = Number(matched[3]);
+    if (year > 2400) year -= 543;
+    else if (year < 100) year += 2000;
+    return `${year}-${matched[2].padStart(2, "0")}-${matched[1].padStart(2, "0")}`;
+  }
+  return text;
+}
+
+function EmployeeImportDialog({
+  open,
+  onOpenChange,
+  employees,
+  onImported,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  employees: Employee[];
+  onImported: (employees: Employee[]) => void;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<ImportEmployee[]>([]);
+  const [errors, setErrors] = useState<Array<{ row: number; message: string }>>(
+    [],
+  );
+  const [importing, setImporting] = useState(false);
+
+  function close(nextOpen: boolean) {
+    onOpenChange(nextOpen);
+    if (!nextOpen) {
+      setFileName("");
+      setRows([]);
+      setErrors([]);
+    }
+  }
+
+  async function readFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.size > 10 * 1024 * 1024)
+        throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 10 MB");
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!sheet) throw new Error("ไม่พบชีตข้อมูลในไฟล์");
+      const imported = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: "",
+        raw: false,
+      });
+      if (!imported.length) throw new Error("ไฟล์ไม่มีข้อมูลพนักงาน");
+
+      const current = new Map(employees.map((item) => [item.id, item]));
+      const found = new Set<string>();
+      const nextRows: ImportEmployee[] = [];
+      const nextErrors: Array<{ row: number; message: string }> = [];
+
+      imported.slice(0, 500).forEach((row, index) => {
+        const rowNumber = index + 2;
+        const id = importText(
+          importCell(row, ["รหัสพนักงาน", "รหัส", "employee id", "employee_id", "id"]),
+        );
+        if (!id) {
+          nextErrors.push({ row: rowNumber, message: "ไม่มีรหัสพนักงาน" });
+          return;
+        }
+        if (found.has(id)) {
+          nextErrors.push({ row: rowNumber, message: `รหัส ${id} ซ้ำในไฟล์` });
+          return;
+        }
+        found.add(id);
+        const existing = current.get(id);
+        const value = (aliases: string[], fallback: string) =>
+          importText(importCell(row, aliases)) || fallback;
+        const nickname = value(["ชื่อเล่น", "nickname", "nick name"], existing?.nickname ?? "");
+        const team = value(["ทีม", "team"], existing?.team ?? "");
+        if (!nickname || !team) {
+          nextErrors.push({
+            row: rowNumber,
+            message: !nickname ? "ไม่มีชื่อเล่น" : "ไม่มีทีม",
+          });
+          return;
+        }
+        const salaryText = importText(importCell(row, ["เงินเดือน", "salary"]));
+        const salaryNumber = Number(salaryText.replace(/,/g, ""));
+        nextRows.push({
+          id,
+          sequence: existing?.sequence ?? 0,
+          nickname,
+          team,
+          fullName: value(
+            ["ชื่อ-นามสกุล", "ชื่อ นามสกุล", "ชื่อจริง", "fullname", "name"],
+            existing?.fullName ?? "",
+          ),
+          position: value(["ตำแหน่ง", "position"], existing?.position ?? "Staff"),
+          employment: value(
+            ["ประเภทการจ้าง", "ประเภทการจ้างงาน", "employment"],
+            existing?.employment ?? "FullTime",
+          ),
+          salary:
+            salaryText && Number.isFinite(salaryNumber)
+              ? Math.max(0, Math.round(salaryNumber))
+              : (existing?.salary ?? null),
+          bankName: value(["ธนาคาร", "bank", "bankname"], existing?.bankName ?? ""),
+          bankAccount: value(
+            ["เลขบัญชี", "เลขที่บัญชี", "bankaccount", "accountnumber"],
+            existing?.bankAccount ?? "",
+          ).replace(/\D/g, ""),
+          accountName: value(["ชื่อบัญชี", "accountname"], existing?.accountName ?? ""),
+          startDate:
+            importDate(importCell(row, ["วันที่เริ่มงาน", "startdate"])) ||
+            existing?.startDate ||
+            "",
+          endDate:
+            importDate(importCell(row, ["วันที่ออกงาน", "enddate"])) ||
+            existing?.endDate ||
+            "",
+          aff: value(["aff"], existing?.aff ?? ""),
+          email: value(["อีเมล", "email"], existing?.email ?? ""),
+          discordId: value(["discord id", "discordid", "discord"], existing?.discordId ?? ""),
+          dynadot: value(["dynadot"], existing?.dynadot ?? ""),
+          referredBy: value(["ผู้แนะนำ", "referredby", "referrer"], existing?.referredBy ?? ""),
+          probation: value(
+            ["สถานะทดลองงาน", "probation"],
+            existing?.probation ?? "ยังไม่ผ่าน",
+          ),
+          status: value(
+            ["สถานะพนักงาน", "สถานะ", "status"],
+            existing?.status ?? "ยังทำงานอยู่",
+          ),
+        });
+      });
+      if (imported.length > 500)
+        nextErrors.push({ row: 502, message: "ไฟล์เกิน 500 รายการ ระบบอ่านเฉพาะ 500 รายการแรก" });
+      setFileName(file.name);
+      setRows(nextRows);
+      setErrors(nextErrors);
+      if (!nextRows.length) throw new Error("ไม่พบแถวที่พร้อมนำเข้า");
+    } catch (error) {
+      setRows([]);
+      toast.error(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  async function downloadTemplate() {
+    const XLSX = await import("xlsx");
+    const worksheet = XLSX.utils.aoa_to_sheet([employeeImportHeaders]);
+    worksheet["!cols"] = employeeImportHeaders.map((header) => ({
+      wch: Math.max(14, header.length + 4),
+    }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "ข้อมูลพนักงาน");
+    XLSX.writeFile(workbook, "employee-import-template.xlsx");
+  }
+
+  async function submitImport() {
+    if (!rows.length || importing) return;
+    setImporting(true);
+    try {
+      const response = await fetch("/api/employees", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "bulk_import", employees: rows }),
+      });
+      const result = (await response.json()) as {
+        employees?: Employee[];
+        added?: number;
+        updated?: number;
+        error?: string;
+      };
+      if (!response.ok || !result.employees)
+        throw new Error(result.error || "นำเข้าข้อมูลไม่สำเร็จ");
+      onImported(result.employees);
+      toast.success("นำเข้าข้อมูลพนักงานแล้ว", {
+        description: `เพิ่มใหม่ ${result.added ?? 0} · อัปเดต ${result.updated ?? 0} รายการ`,
+      });
+      close(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "นำเข้าข้อมูลไม่สำเร็จ");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={close}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>นำเข้าข้อมูลพนักงาน</DialogTitle>
+          <DialogDescription>
+            รองรับ Excel และ CSV · ต้องมีรหัสพนักงาน ชื่อเล่น และทีม
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50 px-4 py-6 text-sm font-medium text-indigo-700 hover:bg-indigo-100">
+            <Upload className="size-5" /> เลือกไฟล์ .xlsx / .xls / .csv
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={readFile}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void downloadTemplate()}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-6 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <FileSpreadsheet className="size-5" /> ดาวน์โหลดไฟล์แม่แบบ
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          แนะนำให้กำหนดคอลัมน์รหัสพนักงานและเลขบัญชีเป็นรูปแบบข้อความ
+          เพื่อรักษาเลขศูนย์ด้านหน้า
+        </p>
+        {fileName && (
+          <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
+            <strong>{fileName}</strong>
+            <p className="mt-1 text-slate-500">
+              พร้อมนำเข้า {rows.length} รายการ · ต้องตรวจสอบ {errors.length} รายการ
+            </p>
+          </div>
+        )}
+        {rows.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>รหัส</TableHead>
+                  <TableHead>ชื่อเล่น</TableHead>
+                  <TableHead>ทีม</TableHead>
+                  <TableHead>ตำแหน่ง</TableHead>
+                  <TableHead>การดำเนินการ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.slice(0, 8).map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-mono">{row.id}</TableCell>
+                    <TableCell>{row.nickname}</TableCell>
+                    <TableCell>{row.team}</TableCell>
+                    <TableCell>{row.position}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {employees.some((item) => item.id === row.id)
+                          ? "อัปเดต"
+                          : "เพิ่มใหม่"}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {rows.length > 8 && (
+              <p className="border-t px-4 py-3 text-xs text-slate-500">
+                และอีก {rows.length - 8} รายการ
+              </p>
+            )}
+          </div>
+        )}
+        {errors.length > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <strong>รายการที่ไม่นำเข้า</strong>
+            <ul className="mt-2 max-h-28 list-disc space-y-1 overflow-y-auto pl-5 text-xs">
+              {errors.slice(0, 20).map((error) => (
+                <li key={`${error.row}-${error.message}`}>
+                  แถว {error.row}: {error.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <DialogFooter className="mt-6">
+          <Button variant="outline" onClick={() => close(false)} disabled={importing}>
+            ยกเลิก
+          </Button>
+          <Button onClick={() => void submitImport()} disabled={!rows.length || importing}>
+            {importing ? <Loader2 className="animate-spin" /> : <Upload />}
+            {importing ? "กำลังนำเข้า..." : `นำเข้า ${rows.length} รายการ`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AddEmployeeDialog({
   open,
   onOpenChange,
@@ -1603,6 +1978,7 @@ export default function PeopleOSClient() {
   const [view, setView] = useState<View>("dashboard");
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [access, setAccess] = useState<{
     currentUser: {
       email: string;
@@ -1834,6 +2210,7 @@ export default function PeopleOSClient() {
               employees={employees}
               mode="all"
               onAdd={() => setAddOpen(true)}
+              onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
             />
           )}
@@ -1842,6 +2219,7 @@ export default function PeopleOSClient() {
               employees={employees}
               mode="members"
               onAdd={() => setAddOpen(true)}
+              onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
             />
           )}
@@ -1853,6 +2231,7 @@ export default function PeopleOSClient() {
               employees={employees}
               mode="resignations"
               onAdd={() => setAddOpen(true)}
+              onImport={() => setImportOpen(true)}
               onEmployeeSaved={updateEmployeeInList}
             />
           )}
@@ -1874,6 +2253,12 @@ export default function PeopleOSClient() {
         open={addOpen}
         onOpenChange={setAddOpen}
         onSave={addEmployee}
+      />
+      <EmployeeImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        employees={employees}
+        onImported={setEmployees}
       />
       <Toaster richColors position="top-right" />
     </SidebarProvider>
