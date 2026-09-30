@@ -1,5 +1,6 @@
 import {
   createEmployee,
+  deleteEmployee,
   importEmployees,
   listEmployees,
   nextEmployeeSequence,
@@ -7,6 +8,8 @@ import {
 } from "@/db/employees";
 import type { SeedEmployee } from "@/db/seed-employees";
 import { requireApiUser } from "@/app/api/auth";
+import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { ensureAttendanceSetup } from "@/db/attendance";
 
 function asText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -109,6 +112,32 @@ export async function PUT(request: Request) {
       Number.isFinite(sequence) ? sequence : 0,
     );
     return Response.json({ employee: await updateEmployee(employee) });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const unauthorized = await requireApiUser(request);
+  if (unauthorized) return unauthorized;
+  try {
+    const authenticated = await getChatGPTUser();
+    if (authenticated) {
+      const user = await ensureAttendanceSetup({
+        userId: authenticated.userId,
+        email: authenticated.email,
+        displayName: authenticated.displayName,
+      });
+      if (user.role !== "hr")
+        return Response.json(
+          { error: "เฉพาะ HR เท่านั้นที่ลบข้อมูลพนักงานได้" },
+          { status: 403 },
+        );
+    }
+    const payload = (await request.json()) as Record<string, unknown>;
+    const id = asText(payload.id);
+    if (!id) throw new Error("กรุณาระบุรหัสพนักงาน");
+    return Response.json({ employee: await deleteEmployee(id) });
   } catch (error) {
     return errorResponse(error);
   }
