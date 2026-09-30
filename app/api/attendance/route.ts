@@ -45,7 +45,10 @@ export async function DELETE(request: NextRequest) {
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "เกิดข้อผิดพลาด กรุณาลองใหม่";
-  const status = message.includes("ไม่มีสิทธิ์") || message.includes("เฉพาะ HR") || message.includes("Audit")
+  const transient = /overloaded|SQLITE_BUSY|database is locked|timed? out/i.test(message);
+  const status = transient
+    ? 503
+    : message.includes("ไม่มีสิทธิ์") || message.includes("เฉพาะ HR") || message.includes("Audit")
     ? 403
     : message.includes("UNIQUE constraint")
       ? 409
@@ -56,15 +59,42 @@ function errorResponse(error: unknown) {
   );
 }
 
+async function withReadRetry<T>(operation: () => Promise<T>) {
+  const delays = [60, 180];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        attempt >= delays.length ||
+        !/overloaded|SQLITE_BUSY|database is locked|timed? out/i.test(message)
+      )
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 export async function GET(request: NextRequest) {
   const auth = await resolveUser(request);
   if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
 
   try {
-    const user = await ensureAttendanceSetup(auth);
     const month = request.nextUrl.searchParams.get("month") ?? "";
     const employeeId = request.nextUrl.searchParams.get("employeeId") ?? undefined;
-    return NextResponse.json(await getAttendanceData(user, month, employeeId));
+    const requestedAuditPage = Number(
+      request.nextUrl.searchParams.get("auditPage") ?? 1,
+    );
+    const auditPage = Number.isFinite(requestedAuditPage)
+      ? Math.max(1, Math.floor(requestedAuditPage))
+      : 1;
+    return NextResponse.json(
+      await withReadRetry(async () => {
+        const user = await ensureAttendanceSetup(auth);
+        return getAttendanceData(user, month, employeeId, auditPage);
+      }),
+    );
   } catch (error) {
     return errorResponse(error);
   }
