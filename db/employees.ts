@@ -259,6 +259,49 @@ export async function updateEmployee(input: SeedEmployee): Promise<EmployeeRecor
   return mapEmployee(row);
 }
 
+export async function deleteEmployee(employeeId: string) {
+  const database = getD1();
+  const employee = await database
+    .prepare("SELECT id, nickname FROM hr_employees WHERE id = ?")
+    .bind(employeeId)
+    .first<{ id: string; nickname: string }>();
+  if (!employee) throw new Error("ไม่พบพนักงานที่ต้องการลบ");
+
+  await database.batch([
+    database
+      .prepare(
+        "UPDATE hr_system_users SET employee_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE employee_id = ?",
+      )
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_attendance_audit_logs WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_attendance_records WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare(
+        "DELETE FROM hr_advance_installments WHERE advance_id IN (SELECT id FROM hr_employee_advances WHERE employee_id = ?)",
+      )
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_employee_advances WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_warning_records WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_monthly_deposit_results WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_payroll_records WHERE employee_id = ?")
+      .bind(employeeId),
+    database.prepare("DELETE FROM hr_employees WHERE id = ?").bind(employeeId),
+  ]);
+
+  return { id: String(employee.id), nickname: String(employee.nickname) };
+}
+
 export async function nextEmployeeSequence() {
   await ensureEmployeesSeeded();
   const row = await getD1().prepare("SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM hr_employees").first<{ next_sequence: number }>();
