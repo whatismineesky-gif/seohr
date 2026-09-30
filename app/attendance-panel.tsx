@@ -91,6 +91,7 @@ type AttendanceData = {
     id: string;
     nickname: string;
     team: string;
+    position: string;
     email: string;
     status: string;
     endDate: string;
@@ -194,6 +195,40 @@ function bangkokDateValue() {
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
   return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+const attendancePositionRank: Record<string, number> = {
+  head: 0,
+  seniorstaff: 1,
+  staff: 2,
+  parttime: 3,
+  freelancer: 4,
+};
+
+function normalizedPosition(value: string) {
+  return value.trim().toLowerCase().replace(/[\s_\-–—./()]+/g, "");
+}
+
+function teamOrder(value: string) {
+  const matched = value.match(/\d+/);
+  return matched ? Number(matched[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+function compareAttendanceEmployees(
+  left: AttendanceData["employees"][number],
+  right: AttendanceData["employees"][number],
+) {
+  const teamDifference = teamOrder(left.team) - teamOrder(right.team);
+  if (teamDifference !== 0) return teamDifference;
+  const teamNameDifference = left.team.localeCompare(right.team, "th", {
+    numeric: true,
+  });
+  if (teamNameDifference !== 0) return teamNameDifference;
+  const positionDifference =
+    (attendancePositionRank[normalizedPosition(left.position)] ?? 99) -
+    (attendancePositionRank[normalizedPosition(right.position)] ?? 99);
+  if (positionDifference !== 0) return positionDifference;
+  return left.nickname.localeCompare(right.nickname, "th", { numeric: true });
 }
 
 function formatAuditDateTime(value: string) {
@@ -582,6 +617,15 @@ export function AttendancePanel() {
   const canRecord =
     data.currentUser.role !== "employee" ||
     Boolean(data.currentUser.employeeId);
+  const monthlyEmployees = (
+    data.currentUser.role === "employee"
+      ? data.employees.filter(
+          (employee) => employee.id === data.currentUser.employeeId,
+        )
+      : data.employees
+  )
+    .slice()
+    .sort(compareAttendanceEmployees);
 
   return (
     <Tabs defaultValue="attendance" className="space-y-5">
@@ -1113,19 +1157,14 @@ export function AttendancePanel() {
                 </tr>
               </thead>
               <tbody>
-                {(data.currentUser.role === "employee"
-                  ? data.employees.filter(
-                      (employee) => employee.id === data.currentUser.employeeId,
-                    )
-                  : data.employees
-                ).map((employee) => (
+                {monthlyEmployees.map((employee) => (
                   <tr key={employee.id} className="hover:bg-slate-50">
                     <td className="sticky left-0 z-10 border-b border-r bg-white px-3 py-2">
                       <strong className="block text-sm">
                         {employee.nickname}
                       </strong>
                       <span className="text-[11px] text-slate-500">
-                        {employee.id} · {employee.team}
+                        {employee.id} · {employee.team} · {employee.position}
                       </span>
                       {employee.status === "ลาออก" && (
                         <span className="mt-1 block text-[11px] font-medium text-rose-600">
