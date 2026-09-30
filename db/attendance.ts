@@ -98,34 +98,52 @@ export async function ensureAttendanceSetup(
 ): Promise<SystemUser> {
   await ensureEmployeesSeeded();
   const database = getD1();
-  const ruleSql = `
-    INSERT OR IGNORE INTO hr_attendance_rules (
-      code, name, event_type, trigger_from, action_type, action_value,
-      period, active, built_in, created_by_email
-    ) VALUES (?, ?, ?, ?, ?, ?, 'monthly', 1, 1, ?)
-  `;
-  await database.batch(
-    defaultRules.map((rule) =>
-      database.prepare(ruleSql).bind(...rule, user.email),
-    ),
-  );
-
-  const existing = await database
-    .prepare(
-      "SELECT user_id, email, display_name, role, employee_id FROM hr_system_users WHERE email = ? COLLATE NOCASE",
-    )
-    .bind(user.email)
-    .first<Record<string, unknown>>();
-  if (existing) {
-    await database
+  const [existingResult, ruleCountResult] = await database.batch([
+    database
       .prepare(
-        `
-      UPDATE hr_system_users SET user_id = ?, display_name = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE email = ? COLLATE NOCASE
-    `,
+        "SELECT user_id, email, display_name, role, employee_id FROM hr_system_users WHERE email = ? COLLATE NOCASE",
       )
-      .bind(user.userId, user.displayName, user.email)
-      .run();
+      .bind(user.email),
+    database.prepare(
+      `SELECT COUNT(*) AS count FROM hr_attendance_rules
+       WHERE code IN ('LATE_BONUS', 'MEETING_LEAVE_BONUS', 'ABSENCE_DEDUCTION',
+         'LATE_FORCE_LEAVE', 'MEETING_LEAVE_LIMIT', 'ABSENCE_LIMIT')`,
+    ),
+  ]);
+  const existing = existingResult.results[0] as
+    | Record<string, unknown>
+    | undefined;
+  const ruleCount = Number(ruleCountResult.results[0]?.count ?? 0);
+
+  if (ruleCount < defaultRules.length) {
+    const ruleSql = `
+      INSERT OR IGNORE INTO hr_attendance_rules (
+        code, name, event_type, trigger_from, action_type, action_value,
+        period, active, built_in, created_by_email
+      ) VALUES (?, ?, ?, ?, ?, ?, 'monthly', 1, 1, ?)
+    `;
+    await database.batch(
+      defaultRules.map((rule) =>
+        database.prepare(ruleSql).bind(...rule, user.email),
+      ),
+    );
+  }
+
+  if (existing) {
+    if (
+      String(existing.user_id ?? "") !== user.userId ||
+      String(existing.display_name ?? "") !== user.displayName
+    ) {
+      await database
+        .prepare(
+          `
+        UPDATE hr_system_users SET user_id = ?, display_name = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE email = ? COLLATE NOCASE
+      `,
+        )
+        .bind(user.userId, user.displayName, user.email)
+        .run();
+    }
     return {
       ...mapSystemUser(existing),
       userId: user.userId,
@@ -188,6 +206,7 @@ export async function getAttendanceData(
   user: SystemUser,
   requestedMonth: string,
   requestedEmployeeId?: string,
+  requestedAuditPage = 1,
 ) {
   const database = getD1();
   const bounds = monthBounds(requestedMonth);
@@ -226,6 +245,12 @@ export async function getAttendanceData(
         ? requestedEmployeeId
         : (employees[0]?.id ?? null);
 
+  const auditPageSize = 50;
+  const auditPage = Number.isFinite(requestedAuditPage)
+    ? Math.max(1, Math.floor(requestedAuditPage))
+    : 1;
+  const auditOffset = (auditPage - 1) * auditPageSize;
+
   const recordsSql =
     user.role === "employee"
       ? `SELECT r.*, e.nickname, e.team FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id WHERE r.record_date >= ? AND r.record_date < ? AND r.employee_id = ? ORDER BY r.record_date DESC, r.id DESC`
@@ -236,9 +261,44 @@ export async function getAttendanceData(
           .prepare(recordsSql)
           .bind(bounds.start, bounds.next, user.employeeId ?? "")
       : database.prepare(recordsSql).bind(bounds.start, bounds.next);
-  const records = (
-    await recordStatement.all<Record<string, unknown>>()
-  ).results.map((row) => ({
+
+  const auditWhere = `employee_id = ?
+    AND ((previous_record_date >= ? AND previous_record_date < ?)
+      OR (new_record_date >= ? AND new_record_date < ?))`;
+  const auditBindings = [
+    selectedEmployeeId ?? "",
+    bounds.start,
+    bounds.next,
+    bounds.start,
+    bounds.next,
+  ] as const;
+  const auditStatement = database
+    .prepare(
+      `SELECT * FROM hr_attendance_audit_logs
+       WHERE ${auditWhere}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(...auditBindings, auditPageSize, auditOffset);
+  const auditCountStatement = database
+    .prepare(
+      `SELECT COUNT(*) AS count FROM hr_attendance_audit_logs WHERE ${auditWhere}`,
+    )
+    .bind(...auditBindings);
+  const rulesStatement = database.prepare(`
+    SELECT id, code, name, event_type, trigger_from, action_type, action_value, period, active, built_in
+    FROM hr_attendance_rules ORDER BY built_in DESC, id ASC
+  `);
+
+  const [recordResult, auditResult, auditCountResult, ruleResult] =
+    await database.batch([
+      recordStatement,
+      auditStatement,
+      auditCountStatement,
+      rulesStatement,
+    ]);
+
+  const records = recordResult.results.map((row) => ({
     id: Number(row.id),
     employeeId: String(row.employee_id),
     nickname: String(row.nickname),
@@ -251,34 +311,7 @@ export async function getAttendanceData(
     createdAt: String(row.created_at),
   }));
 
-  const auditSql =
-    user.role === "employee"
-      ? `SELECT * FROM hr_attendance_audit_logs
-       WHERE employee_id = ?
-         AND ((previous_record_date >= ? AND previous_record_date < ?)
-           OR (new_record_date >= ? AND new_record_date < ?))
-       ORDER BY created_at DESC, id DESC`
-      : `SELECT * FROM hr_attendance_audit_logs
-       WHERE (previous_record_date >= ? AND previous_record_date < ?)
-          OR (new_record_date >= ? AND new_record_date < ?)
-       ORDER BY created_at DESC, id DESC`;
-  const auditStatement =
-    user.role === "employee"
-      ? database
-          .prepare(auditSql)
-          .bind(
-            user.employeeId ?? "",
-            bounds.start,
-            bounds.next,
-            bounds.start,
-            bounds.next,
-          )
-      : database
-          .prepare(auditSql)
-          .bind(bounds.start, bounds.next, bounds.start, bounds.next);
-  const auditLogs = (
-    await auditStatement.all<Record<string, unknown>>()
-  ).results.map((row) => ({
+  const auditLogs = auditResult.results.map((row) => ({
     id: Number(row.id),
     attendanceRecordId: Number(row.attendance_record_id),
     employeeId: String(row.employee_id),
@@ -299,15 +332,9 @@ export async function getAttendanceData(
     createdAt: String(row.created_at),
   }));
 
-  const ruleRows = await database
-    .prepare(
-      `
-    SELECT id, code, name, event_type, trigger_from, action_type, action_value, period, active, built_in
-    FROM hr_attendance_rules ORDER BY built_in DESC, id ASC
-  `,
-    )
-    .all<Record<string, unknown>>();
-  const rules = ruleRows.results.map(mapRule);
+  const auditTotal = Number(auditCountResult.results[0]?.count ?? 0);
+  const auditPageCount = Math.max(1, Math.ceil(auditTotal / auditPageSize));
+  const rules = ruleResult.results.map(mapRule);
   const selectedRecords = records.filter(
     (record) => record.employeeId === selectedEmployeeId,
   );
@@ -384,21 +411,6 @@ export async function getAttendanceData(
     totalDeduction: absenceDeduction,
   };
 
-  let users: Array<Record<string, unknown>> = [];
-  if (user.role === "hr") {
-    users = (
-      await database
-        .prepare(
-          `
-      SELECT u.email, u.display_name, u.role, u.employee_id, e.nickname
-      FROM hr_system_users u LEFT JOIN hr_employees e ON e.id = u.employee_id
-      ORDER BY CASE u.role WHEN 'hr' THEN 1 WHEN 'audit' THEN 2 ELSE 3 END, u.email
-    `,
-        )
-        .all<Record<string, unknown>>()
-    ).results;
-  }
-
   return {
     currentUser: user,
     month: bounds.month,
@@ -406,9 +418,14 @@ export async function getAttendanceData(
     employees,
     records,
     auditLogs,
+    auditPagination: {
+      page: Math.min(auditPage, auditPageCount),
+      pageSize: auditPageSize,
+      total: auditTotal,
+      pageCount: auditPageCount,
+    },
     rules,
     summary,
-    users,
   };
 }
 
