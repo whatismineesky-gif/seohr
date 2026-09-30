@@ -28,9 +28,24 @@ function parseEmployee(
   const id = asText(payload.id);
   const nickname = asText(payload.nickname);
   const team = asText(payload.team);
+  const rawStatus = asText(payload.status) || "ยังทำงานอยู่";
+  const status =
+    rawStatus === "รอคัดชื่อออก"
+      ? "กำลังรอคัดชื่อออก"
+      : rawStatus === "ลาออกแล้ว"
+        ? "ลาออก"
+        : rawStatus;
+  const allowedStatuses = new Set([
+    "ยังทำงานอยู่",
+    "แจ้งลาออก",
+    "กำลังรอคัดชื่อออก",
+    "ลาออก",
+  ]);
   if (!id) throw new Error("กรุณาระบุรหัสพนักงาน");
   if (!nickname) throw new Error("กรุณาระบุชื่อเล่น");
   if (!team) throw new Error("กรุณาระบุทีม");
+  if (!allowedStatuses.has(status))
+    throw new Error(`สถานะพนักงานไม่ถูกต้อง: ${status}`);
 
   return {
     id,
@@ -52,7 +67,7 @@ function parseEmployee(
     dynadot: asText(payload.dynadot),
     referredBy: asText(payload.referredBy),
     probation: asText(payload.probation) || "ยังไม่ผ่าน",
-    status: asText(payload.status) || "ยังทำงานอยู่",
+    status,
   };
 }
 
