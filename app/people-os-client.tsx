@@ -2391,7 +2391,9 @@ export default function PeopleOSClient() {
           {!accessLoading && access && view === "advances" && (
             <AdvancePanel employees={employees} />
           )}
-          {!accessLoading && access && view === "warnings" && <WarningPanel />}
+          {!accessLoading && access && view === "warnings" && (
+            <WarningPanel canEdit={access.currentUser.role === "hr"} />
+          )}
           {!accessLoading && access && view === "payroll" && (
             <PayrollPanel employees={employees} />
           )}
