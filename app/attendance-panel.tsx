@@ -184,6 +184,18 @@ const money = new Intl.NumberFormat("th-TH", {
   maximumFractionDigits: 0,
 });
 
+function bangkokDateValue() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
 function formatAuditDateTime(value: string) {
   const parsed = new Date(
     value.includes("T") ? value : `${value.replace(" ", "T")}Z`,
@@ -350,7 +362,7 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
 }
 
 export function AttendancePanel() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => bangkokDateValue().slice(0, 7));
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [auditPage, setAuditPage] = useState(1);
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
@@ -358,9 +370,7 @@ export function AttendancePanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const [recordDate, setRecordDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [recordDate, setRecordDate] = useState(() => bangkokDateValue());
   const [recordType, setRecordType] = useState<EventType>("absence");
   const [reason, setReason] = useState("");
   const [newRule, setNewRule] = useState({
