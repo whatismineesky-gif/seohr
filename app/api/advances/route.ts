@@ -4,18 +4,14 @@ import {
   listAdvances,
   updateAdvance,
 } from "@/db/payroll";
-import { requireApiUser } from "@/app/api/auth";
-
-function fail(error: unknown) {
-  return Response.json(
-    { error: error instanceof Error ? error.message : "บันทึกรายการไม่สำเร็จ" },
-    { status: 400 },
-  );
-}
+import { authorizeApi, safeApiError } from "@/app/api/auth";
 
 export async function PUT(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["advances"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     return Response.json({
       advance: await updateAdvance(
@@ -23,42 +19,56 @@ export async function PUT(request: Request) {
       ),
     });
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "แก้ไขรายการเบิกไม่สำเร็จ");
   }
 }
 
 export async function DELETE(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["advances"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     const body = (await request.json()) as Record<string, unknown>;
     return Response.json(await deleteAdvance(body.id));
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "ลบรายการเบิกไม่สำเร็จ");
   }
 }
 
 export async function GET(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["advances"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
-    const employeeId =
+    const requestedEmployeeId =
       new URL(request.url).searchParams.get("employeeId") ?? undefined;
+    const employeeId =
+      authorization.access.user.role === "employee"
+        ? authorization.access.user.employeeId ?? undefined
+        : requestedEmployeeId;
+    if (authorization.access.user.role === "employee" && !employeeId)
+      return Response.json({ error: "บัญชียังไม่ได้เชื่อมกับพนักงาน" }, { status: 403 });
     return Response.json({ advances: await listAdvances(employeeId) });
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "โหลดรายการเบิกไม่สำเร็จ");
   }
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["advances"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     const advance = await createAdvance(
       (await request.json()) as Record<string, unknown>,
     );
     return Response.json({ advance }, { status: 201 });
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "บันทึกรายการเบิกไม่สำเร็จ");
   }
 }

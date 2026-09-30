@@ -228,7 +228,7 @@ export async function getAttendanceData(
     )
     .bind(bounds.next, bounds.start)
     .all<Record<string, unknown>>();
-  const employees = employeesResult.results.map((row) => ({
+  const allEmployees = employeesResult.results.map((row) => ({
     id: String(row.id),
     nickname: String(row.nickname),
     team: String(row.team),
@@ -237,6 +237,14 @@ export async function getAttendanceData(
     endDate: String(row.end_date ?? ""),
     email: String(row.email ?? ""),
   }));
+  const employees =
+    user.role === "employee"
+      ? allEmployees.filter((employee) => employee.id === user.employeeId)
+      : allEmployees.map((employee) =>
+          user.role === "hr"
+            ? employee
+            : { ...employee, email: "", endDate: "" },
+        );
 
   const selectedEmployeeId =
     user.role === "employee"

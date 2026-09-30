@@ -4,58 +4,28 @@ import {
   saveWarningConfig,
   saveWarningRows,
 } from "@/db/warnings";
-import { requireApiUser } from "@/app/api/auth";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
-import { ensureAttendanceSetup, type AuthUser } from "@/db/attendance";
-
-async function requireHr(request: Request) {
-  const authenticated = await getChatGPTUser();
-  const hostname = new URL(request.url).hostname;
-  const auth: AuthUser | null = authenticated
-    ? {
-        userId: authenticated.userId,
-        email: authenticated.email,
-        displayName: authenticated.displayName,
-      }
-    : ["localhost", "127.0.0.1", "terminal.local"].includes(hostname)
-      ? {
-          userId: "local-qa",
-          email: "qa@local.test",
-          displayName: "Local HR",
-        }
-      : null;
-  if (!auth) return Response.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
-  const user = await ensureAttendanceSetup(auth);
-  return user.role === "hr"
-    ? null
-    : Response.json(
-        { error: "เฉพาะ HR เท่านั้นที่แก้ไขข้อมูลใบเตือนได้" },
-        { status: 403 },
-      );
-}
-
-function fail(error: unknown) {
-  return Response.json(
-    { error: error instanceof Error ? error.message : "ดำเนินการไม่สำเร็จ" },
-    { status: 400 },
-  );
-}
+import { authorizeApi, safeApiError } from "@/app/api/auth";
 
 export async function DELETE(request: Request) {
-  const unauthorized = await requireHr(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["warnings"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     return Response.json(
       await deleteWarningRow((await request.json()) as Record<string, unknown>),
     );
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "ลบข้อมูลใบเตือนไม่สำเร็จ");
   }
 }
 
 export async function GET(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["warnings"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     return Response.json(
       await getWarningData(
@@ -63,13 +33,16 @@ export async function GET(request: Request) {
       ),
     );
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "โหลดข้อมูลใบเตือนไม่สำเร็จ");
   }
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await requireHr(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["warnings"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     const body = (await request.json()) as Record<string, unknown>;
     if (body.action === "save_config")
@@ -78,6 +51,6 @@ export async function POST(request: Request) {
       return Response.json(await saveWarningRows(body));
     throw new Error("ไม่รู้จักคำสั่งที่ส่งมา");
   } catch (error) {
-    return fail(error);
+    return safeApiError(error, "บันทึกข้อมูลใบเตือนไม่สำเร็จ");
   }
 }

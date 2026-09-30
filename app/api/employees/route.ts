@@ -5,11 +5,10 @@ import {
   listEmployees,
   nextEmployeeSequence,
   updateEmployee,
+  type EmployeeRecord,
 } from "@/db/employees";
 import type { SeedEmployee } from "@/db/seed-employees";
-import { requireApiUser } from "@/app/api/auth";
-import { getChatGPTUser } from "@/app/chatgpt-auth";
-import { ensureAttendanceSetup } from "@/db/attendance";
+import { authorizeApi, safeApiError } from "@/app/api/auth";
 
 function asText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -71,29 +70,62 @@ function parseEmployee(
   };
 }
 
-function errorResponse(error: unknown) {
-  const message =
-    error instanceof Error ? error.message : "เกิดข้อผิดพลาด กรุณาลองใหม่";
-  const duplicate = message.includes("UNIQUE constraint failed");
-  return Response.json(
-    { error: duplicate ? "รหัสพนักงานนี้มีอยู่แล้ว" : message },
-    { status: duplicate ? 409 : 500 },
-  );
+function hideSensitiveEmployeeData(employee: EmployeeRecord): EmployeeRecord {
+  return {
+    ...employee,
+    fullName: "",
+    salary: null,
+    bankAccount: "",
+    bankName: "",
+    accountName: "",
+    aff: "",
+    email: "",
+    discordId: "",
+    dynadot: "",
+    referredBy: "",
+  };
 }
 
+const employeeReadPermissions = [
+  "dashboard",
+  "employees",
+  "members",
+  "resignations",
+  "advances",
+  "payroll",
+  "data",
+] as const;
+
 export async function GET(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: [...employeeReadPermissions],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
-    return Response.json({ employees: await listEmployees() });
+    const employees = await listEmployees();
+    if (authorization.access.user.role === "hr")
+      return Response.json({ employees });
+    const visible =
+      authorization.access.user.role === "employee"
+        ? employees.filter(
+            (employee) =>
+              employee.id === authorization.access.user.employeeId,
+          )
+        : employees;
+    return Response.json({
+      employees: visible.map(hideSensitiveEmployeeData),
+    });
   } catch (error) {
-    return errorResponse(error);
+    return safeApiError(error, "โหลดข้อมูลพนักงานไม่สำเร็จ");
   }
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["employees", "data", "resignations"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     const payload = (await request.json()) as Record<string, unknown>;
     if (payload.action === "bulk_import") {
@@ -112,13 +144,16 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
-    return errorResponse(error);
+    return safeApiError(error, "บันทึกข้อมูลพนักงานไม่สำเร็จ");
   }
 }
 
 export async function PUT(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["employees", "data", "resignations"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
     const payload = (await request.json()) as Record<string, unknown>;
     const sequence = Number(payload.sequence ?? 0);
@@ -128,32 +163,22 @@ export async function PUT(request: Request) {
     );
     return Response.json({ employee: await updateEmployee(employee) });
   } catch (error) {
-    return errorResponse(error);
+    return safeApiError(error, "แก้ไขข้อมูลพนักงานไม่สำเร็จ");
   }
 }
 
 export async function DELETE(request: Request) {
-  const unauthorized = await requireApiUser(request);
-  if (unauthorized) return unauthorized;
+  const authorization = await authorizeApi(request, {
+    anyPermissions: ["employees", "resignations"],
+    roles: ["hr"],
+  });
+  if (!authorization.ok) return authorization.response;
   try {
-    const authenticated = await getChatGPTUser();
-    if (authenticated) {
-      const user = await ensureAttendanceSetup({
-        userId: authenticated.userId,
-        email: authenticated.email,
-        displayName: authenticated.displayName,
-      });
-      if (user.role !== "hr")
-        return Response.json(
-          { error: "เฉพาะ HR เท่านั้นที่ลบข้อมูลพนักงานได้" },
-          { status: 403 },
-        );
-    }
     const payload = (await request.json()) as Record<string, unknown>;
     const id = asText(payload.id);
     if (!id) throw new Error("กรุณาระบุรหัสพนักงาน");
     return Response.json({ employee: await deleteEmployee(id) });
   } catch (error) {
-    return errorResponse(error);
+    return safeApiError(error, "ลบข้อมูลพนักงานไม่สำเร็จ");
   }
 }

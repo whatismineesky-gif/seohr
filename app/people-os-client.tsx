@@ -2172,6 +2172,20 @@ export default function PeopleOSClient() {
   }
 
   useEffect(() => {
+    if (!access) return;
+    const needsEmployees = [
+      "dashboard",
+      "employees",
+      "members",
+      "resignations",
+      "advances",
+      "payroll",
+      "data",
+    ].some((permission) => access.permissions.includes(permission as View));
+    if (!needsEmployees) {
+      const task = window.setTimeout(() => setEmployees([]), 0);
+      return () => window.clearTimeout(task);
+    }
     let active = true;
     fetch("/api/employees", { cache: "no-store" })
       .then(async (response) => {
@@ -2192,7 +2206,7 @@ export default function PeopleOSClient() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [access]);
 
   useEffect(() => {
     void loadAccess();

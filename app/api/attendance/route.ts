@@ -1,62 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { authorizeApi, safeApiError } from "@/app/api/auth";
 import {
   createAttendanceRecord,
   deleteAttendanceRecord,
-  ensureAttendanceSetup,
   getAttendanceData,
   saveAttendanceRule,
   saveSystemUser,
   updateAttendanceRecord,
-  type AuthUser,
 } from "@/db/attendance";
 
-async function resolveUser(request: NextRequest): Promise<AuthUser | null> {
-  const authenticated = await getChatGPTUser();
-  if (authenticated) {
-    return {
-      userId: authenticated.userId,
-      email: authenticated.email,
-      displayName: authenticated.displayName,
-    };
-  }
-
-  const hostname = request.nextUrl.hostname;
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "terminal.local") {
-    return { userId: "local-qa", email: "qa@local.test", displayName: "Local HR" };
-  }
-  return null;
-}
-
 export async function PUT(request: NextRequest) {
-  const auth = await resolveUser(request);
-  if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
-  try { const user = await ensureAttendanceSetup(auth); return NextResponse.json(await updateAttendanceRecord(user, await request.json() as Record<string, unknown>)); }
+  const authorization = await authorizeApi(request, { anyPermissions: ["attendance"] });
+  if (!authorization.ok) return authorization.response;
+  try { return NextResponse.json(await updateAttendanceRecord(authorization.access.user, await request.json() as Record<string, unknown>)); }
   catch (error) { return errorResponse(error); }
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await resolveUser(request);
-  if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
-  try { const user = await ensureAttendanceSetup(auth); const body = await request.json() as Record<string, unknown>; return NextResponse.json(await deleteAttendanceRecord(user, body.id)); }
+  const authorization = await authorizeApi(request, { anyPermissions: ["attendance"] });
+  if (!authorization.ok) return authorization.response;
+  try { const body = await request.json() as Record<string, unknown>; return NextResponse.json(await deleteAttendanceRecord(authorization.access.user, body.id)); }
   catch (error) { return errorResponse(error); }
 }
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "เกิดข้อผิดพลาด กรุณาลองใหม่";
   const transient = /overloaded|SQLITE_BUSY|database is locked|timed? out/i.test(message);
-  const status = transient
-    ? 503
-    : message.includes("ไม่มีสิทธิ์") || message.includes("เฉพาะ HR") || message.includes("Audit")
-    ? 403
-    : message.includes("UNIQUE constraint")
-      ? 409
-      : 400;
-  return NextResponse.json(
-    { error: status === 409 ? "มีรายการประเภทนี้ในวันที่เลือกแล้ว" : message },
-    { status },
-  );
+  if (transient)
+    return NextResponse.json(
+      { error: "ระบบฐานข้อมูลไม่ว่าง กรุณาลองใหม่" },
+      { status: 503 },
+    );
+  if (message.includes("UNIQUE constraint"))
+    return NextResponse.json(
+      { error: "มีรายการประเภทนี้ในวันที่เลือกแล้ว" },
+      { status: 409 },
+    );
+  if (
+    message.includes("ไม่มีสิทธิ์") ||
+    message.includes("เฉพาะ HR") ||
+    message.includes("Audit")
+  )
+    return NextResponse.json({ error: "ไม่มีสิทธิ์ดำเนินการ" }, { status: 403 });
+  return safeApiError(error, "ดำเนินการลงเวลาไม่สำเร็จ");
 }
 
 async function withReadRetry<T>(operation: () => Promise<T>) {
@@ -77,8 +64,8 @@ async function withReadRetry<T>(operation: () => Promise<T>) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await resolveUser(request);
-  if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  const authorization = await authorizeApi(request, { anyPermissions: ["attendance"] });
+  if (!authorization.ok) return authorization.response;
 
   try {
     const month = request.nextUrl.searchParams.get("month") ?? "";
@@ -91,8 +78,12 @@ export async function GET(request: NextRequest) {
       : 1;
     return NextResponse.json(
       await withReadRetry(async () => {
-        const user = await ensureAttendanceSetup(auth);
-        return getAttendanceData(user, month, employeeId, auditPage);
+        return getAttendanceData(
+          authorization.access.user,
+          month,
+          employeeId,
+          auditPage,
+        );
       }),
     );
   } catch (error) {
@@ -101,11 +92,11 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await resolveUser(request);
-  if (!auth) return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
+  const authorization = await authorizeApi(request, { anyPermissions: ["attendance"] });
+  if (!authorization.ok) return authorization.response;
 
   try {
-    const user = await ensureAttendanceSetup(auth);
+    const user = authorization.access.user;
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? "");
 

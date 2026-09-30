@@ -34,7 +34,7 @@ async function hashPassword(password: string) {
 const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
   hr: [...menuIds],
   audit: ["dashboard", "employees", "members", "attendance"],
-  employee: ["dashboard", "attendance"],
+  employee: ["attendance"],
 };
 
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
@@ -49,13 +49,27 @@ function role(value: unknown): SystemUser["role"] {
   return value === "hr" || value === "audit" ? value : "employee";
 }
 
+export async function getSystemAccess(auth: AuthUser) {
+  const currentUser = await ensureAttendanceSetup(auth);
+  const current = await getD1()
+    .prepare(
+      "SELECT menu_permissions FROM hr_system_users WHERE email = ? COLLATE NOCASE",
+    )
+    .bind(currentUser.email)
+    .first<Record<string, unknown>>();
+  return {
+    currentUser,
+    permissions: parsePermissions(
+      current?.menu_permissions,
+      currentUser.role,
+    ),
+  };
+}
+
 export async function getAccessData(auth: AuthUser) {
   await ensureEmployeesSeeded();
-  const currentUser = await ensureAttendanceSetup(auth);
+  const { currentUser, permissions } = await getSystemAccess(auth);
   const database = getD1();
-  const current = await database.prepare("SELECT menu_permissions FROM hr_system_users WHERE email = ? COLLATE NOCASE")
-    .bind(currentUser.email).first<Record<string, unknown>>();
-  const permissions = parsePermissions(current?.menu_permissions, currentUser.role);
   const employees = currentUser.role === "hr" ? (await database.prepare(`
     SELECT id, nickname, team, email, status FROM hr_employees ORDER BY sequence, id
   `).all<Record<string, unknown>>()).results : [];
@@ -73,7 +87,16 @@ export async function getAccessData(auth: AuthUser) {
       permissions: parsePermissions(row.menu_permissions, userRole),
     };
   }) : [];
-  return { currentUser, permissions, users, employees };
+  return {
+    currentUser: {
+      email: currentUser.email,
+      displayName: currentUser.displayName,
+      role: currentUser.role,
+    },
+    permissions,
+    users,
+    employees,
+  };
 }
 
 export async function saveAccessUser(currentUser: SystemUser, input: Record<string, unknown>) {
@@ -131,7 +154,6 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
   `).bind(email, email, userRole, employeeId, JSON.stringify(permissions), loginUsername).run();
   return { ok: true };
 }
-
 
 function temporaryPassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";

@@ -73,7 +73,7 @@ const menus = [
 const defaults: Record<Role, string[]> = {
   hr: menus.map(([id]) => id),
   audit: ["dashboard", "employees", "members", "attendance"],
-  employee: ["dashboard", "attendance"],
+  employee: ["attendance"],
 };
 
 export function AccessPanel({

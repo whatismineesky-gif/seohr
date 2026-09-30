@@ -33,7 +33,21 @@ async function verifyPassword(password: string, encoded: string) {
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) return NextResponse.json({ error: "Origin ไม่ถูกต้อง" }, { status: 403 });
+  if (origin !== request.nextUrl.origin)
+    return NextResponse.json(
+      { error: "คำขอไม่ได้รับอนุญาต" },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
+  const contentType = request.headers.get("content-type") ?? "";
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (
+    !contentType.toLowerCase().includes("application/json") ||
+    (Number.isFinite(contentLength) && contentLength > 8 * 1024)
+  )
+    return NextResponse.json(
+      { error: "รูปแบบคำขอไม่ถูกต้อง" },
+      { status: 415, headers: { "cache-control": "no-store" } },
+    );
   const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
   const database = getD1();
 
@@ -50,6 +64,11 @@ export async function POST(request: NextRequest) {
 
   const username = String(payload.username ?? "").trim();
   const password = String(payload.password ?? "");
+  if (!username || username.length > 100 || !password || password.length > 200)
+    return NextResponse.json(
+      { error: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
+      { status: 401, headers: { "cache-control": "no-store" } },
+    );
   const user = await database.prepare(`
     SELECT u.id, u.password_hash, u.status, u.failed_login_count, u.locked_until
     FROM users u
@@ -63,12 +82,19 @@ export async function POST(request: NextRequest) {
   const valid = user?.status === "active" && (!lockedUntil || lockedUntil <= now) && await verifyPassword(password, String(user?.password_hash ?? ""));
   if (!user || !valid) {
     if (user) {
-      const failures = Number(user.failed_login_count ?? 0) + 1;
-      const lock = failures >= 5 ? new Date(now.getTime() + 15 * 60 * 1000).toISOString() : null;
-      await database.prepare("UPDATE users SET failed_login_count = ?, locked_until = ?, updated_at = ? WHERE id = ?")
-        .bind(failures >= 5 ? 0 : failures, lock, now.toISOString(), user.id).run();
+      if (!lockedUntil || lockedUntil <= now) {
+        const failures = Number(user.failed_login_count ?? 0) + 1;
+        const lock = failures >= 5
+          ? new Date(now.getTime() + 15 * 60 * 1000).toISOString()
+          : null;
+        await database.prepare("UPDATE users SET failed_login_count = ?, locked_until = ?, updated_at = ? WHERE id = ?")
+          .bind(failures >= 5 ? 0 : failures, lock, now.toISOString(), user.id).run();
+      }
     }
-    return NextResponse.json({ error: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 });
+    return NextResponse.json(
+      { error: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
+      { status: 401, headers: { "cache-control": "no-store" } },
+    );
   }
 
   const token = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
