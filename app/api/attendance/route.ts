@@ -5,6 +5,7 @@ import {
   createAttendanceRecord,
   deleteAttendanceRecord,
   getAttendanceData,
+  saveAttendanceBonusTier,
   saveAttendanceRule,
   saveSystemUser,
   updateAttendanceRecord,
@@ -104,6 +105,8 @@ export async function POST(request: NextRequest) {
 
     if (action === "record") await createAttendanceRecord(user, body);
     else if (action === "save_rule") await saveAttendanceRule(user, body);
+    else if (action === "save_bonus_tier")
+      await saveAttendanceBonusTier(user, body);
     else if (action === "save_user") await saveSystemUser(user, body);
     else throw new Error("ไม่รู้จักคำสั่งที่ส่งมา");
 

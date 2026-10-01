@@ -143,6 +143,7 @@ type AttendanceData = {
     pageCount: number;
   };
   rules: Rule[];
+  bonusTiers: BonusTier[];
   summary: {
     plannedWorkingDays: number;
     workingDays: number;
@@ -154,10 +155,20 @@ type AttendanceData = {
     lateRemainingBeforeForceLeave: number;
     forcedLeaveDays: number;
     bonusLoss: number;
+    serviceMonth: number;
+    eligibleAttendanceBonus: number;
     attendanceBonus: number;
     absenceDeduction: number;
     totalDeduction: number;
   };
+};
+
+type BonusTier = {
+  id: number;
+  minMonth: number;
+  maxMonth: number | null;
+  amount: number;
+  active: boolean;
 };
 
 type Rule = {
@@ -180,7 +191,7 @@ const eventLabels: Record<EventType, string> = {
 };
 
 const actionLabels: Record<ActionType, string> = {
-  lose_bonus: "ไม่ได้รับเบี้ยขยัน (บาท)",
+  lose_bonus: "งดเบี้ยขยันทั้งหมด",
   deduct_money: "หักเงินต่อครั้ง (บาท)",
   force_leave: "บังคับหยุดต่อครั้ง (วัน)",
   limit: "จำนวนครั้งสูงสุดต่อเดือน",
@@ -390,11 +401,14 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
           />
         </label>
         <label className="field-label">
-          ค่าเงื่อนไข
+          {draft.actionType === "lose_bonus"
+            ? "จำนวนเงิน (ดึงตามอายุงาน)"
+            : "ค่าเงื่อนไข"}
           <Input
             type="number"
             min={0}
-            value={draft.actionValue}
+            disabled={draft.actionType === "lose_bonus"}
+            value={draft.actionType === "lose_bonus" ? 0 : draft.actionValue}
             onChange={(event) =>
               setDraft({ ...draft, actionValue: Number(event.target.value) })
             }
@@ -404,6 +418,79 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
           {saving ? <Loader2 className="animate-spin" /> : <Save />}บันทึก
         </Button>
       </div>
+    </div>
+  );
+}
+
+function BonusTierEditor({
+  tier,
+  onSaved,
+}: {
+  tier: BonusTier;
+  onSaved: () => void;
+}) {
+  const [amount, setAmount] = useState(tier.amount);
+  const [active, setActive] = useState(tier.active);
+  const [saving, setSaving] = useState(false);
+  const rangeLabel =
+    tier.maxMonth === null
+      ? `เดือนที่ ${tier.minMonth} ขึ้นไป`
+      : tier.minMonth === tier.maxMonth
+        ? `เดือนที่ ${tier.minMonth}`
+        : `เดือนที่ ${tier.minMonth}–${tier.maxMonth}`;
+
+  async function save() {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/attendance", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "save_bonus_tier",
+          id: tier.id,
+          amount,
+          active,
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(result.error || "บันทึกเบี้ยขยันไม่สำเร็จ");
+      toast.success(`บันทึกเบี้ยขยัน${rangeLabel}แล้ว`);
+      onSaved();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "บันทึกเบี้ยขยันไม่สำเร็จ",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-500">อายุงาน</p>
+          <strong className="text-slate-950">{rangeLabel}</strong>
+        </div>
+        <Switch checked={active} onCheckedChange={setActive} />
+      </div>
+      <label className="field-label mt-4">
+        จำนวนเบี้ยขยัน
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            min={0}
+            step={100}
+            value={amount}
+            onChange={(event) => setAmount(Number(event.target.value))}
+          />
+          <Button type="button" onClick={() => void save()} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />}
+            บันทึก
+          </Button>
+        </div>
+      </label>
     </div>
   );
 }
@@ -892,9 +979,14 @@ export function AttendancePanel() {
               </div>
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <span className="text-slate-300">เบี้ยขยันที่ได้รับ</span>
-                <strong className="text-xl text-emerald-300">
-                  {money.format(data.summary.attendanceBonus)}
-                </strong>
+                <div className="text-right">
+                  <strong className="block text-xl text-emerald-300">
+                    {money.format(data.summary.attendanceBonus)}
+                  </strong>
+                  <span className="text-xs text-slate-400">
+                    อายุงานเดือนที่ {data.summary.serviceMonth} · สิทธิ {money.format(data.summary.eligibleAttendanceBonus)}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <span className="text-slate-300">หักเงินตามเงื่อนไข</span>
@@ -1460,6 +1552,35 @@ export function AttendancePanel() {
               </div>
             </div>
           </div>
+          <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div>
+              <p className="text-sm font-medium text-emerald-700">
+                ATTENDANCE BONUS BY SERVICE MONTH
+              </p>
+              <h3 className="mt-1 font-semibold text-emerald-950">
+                เบี้ยขยันตามเดือนอายุงาน
+              </h3>
+              <p className="mt-1 text-sm text-emerald-800">
+                เดือนเริ่มงานนับเป็นเดือนที่ 1 โดยไม่คำนวณตามจำนวนวัน
+                หากผิดเงื่อนไข ระบบจะงดเบี้ยขยันทั้งหมดโดยไม่สร้างรายการหักซ้ำ
+              </p>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {data.bonusTiers.map((tier) => (
+                <BonusTierEditor
+                  key={tier.id}
+                  tier={tier}
+                  onSaved={() => void loadData()}
+                />
+              ))}
+            </div>
+          </section>
+          <div className="flex items-center gap-2 pt-2">
+            <Settings2 className="size-5 text-violet-600" />
+            <h3 className="font-semibold text-slate-950">
+              เงื่อนไขที่ทำให้เสียสิทธิ์หรือเกิดรายการหัก
+            </h3>
+          </div>
           {data.rules.map((rule) => (
             <RuleEditor
               key={rule.id}
@@ -1540,11 +1661,18 @@ export function AttendancePanel() {
                 />
               </label>
               <label className="field-label">
-                ค่าเงื่อนไข
+                {newRule.actionType === "lose_bonus"
+                  ? "จำนวนเงิน (ดึงตามอายุงาน)"
+                  : "ค่าเงื่อนไข"}
                 <Input
                   type="number"
                   min={0}
-                  value={newRule.actionValue}
+                  disabled={newRule.actionType === "lose_bonus"}
+                  value={
+                    newRule.actionType === "lose_bonus"
+                      ? 0
+                      : newRule.actionValue
+                  }
                   onChange={(event) =>
                     setNewRule({
                       ...newRule,

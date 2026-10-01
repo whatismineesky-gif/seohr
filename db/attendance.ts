@@ -27,15 +27,23 @@ export type AttendanceRule = {
   builtIn: boolean;
 };
 
+export type AttendanceBonusTier = {
+  id: number;
+  minMonth: number;
+  maxMonth: number | null;
+  amount: number;
+  active: boolean;
+};
+
 const defaultRules = [
-  ["LATE_BONUS", "มาสายไม่ได้รับเบี้ยขยัน", "late", 1, "lose_bonus", 1000],
+  ["LATE_BONUS", "มาสายไม่ได้รับเบี้ยขยัน", "late", 1, "lose_bonus", 0],
   [
     "MEETING_LEAVE_BONUS",
     "ลาประชุมไม่ได้รับเบี้ยขยัน",
     "meeting_leave",
     1,
     "lose_bonus",
-    1000,
+    0,
   ],
   [
     "ABSENCE_DEDUCTION",
@@ -64,6 +72,13 @@ const defaultRules = [
   ["ABSENCE_LIMIT", "หยุดงานได้ต่อเดือน", "absence", 1, "limit", 4],
 ] as const;
 
+const defaultBonusTiers: AttendanceBonusTier[] = [
+  { id: 1, minMonth: 1, maxMonth: 3, amount: 0, active: true },
+  { id: 2, minMonth: 4, maxMonth: 4, amount: 1000, active: true },
+  { id: 3, minMonth: 5, maxMonth: 5, amount: 1500, active: true },
+  { id: 4, minMonth: 6, maxMonth: null, amount: 2000, active: true },
+];
+
 function mapRole(value: unknown): AppRole {
   return value === "hr" || value === "audit" ? value : "employee";
 }
@@ -91,6 +106,52 @@ function mapRule(row: Record<string, unknown>): AttendanceRule {
     active: Boolean(row.active),
     builtIn: Boolean(row.built_in),
   };
+}
+
+function mapBonusTier(row: Record<string, unknown>): AttendanceBonusTier {
+  return {
+    id: Number(row.id),
+    minMonth: Number(row.min_month),
+    maxMonth:
+      row.max_month === null || row.max_month === undefined
+        ? null
+        : Number(row.max_month),
+    amount: Number(row.amount ?? 0),
+    active: Boolean(row.active),
+  };
+}
+
+function normalizedMonthFromDate(value: unknown) {
+  const text = String(value ?? "").trim();
+  const thai = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+  if (thai) return `${thai[3]}-${thai[2]}`;
+  const iso = /^(\d{4})-(\d{2})/.exec(text);
+  return iso ? `${iso[1]}-${iso[2]}` : "";
+}
+
+function serviceMonthFor(startDate: unknown, payrollMonth: string) {
+  const startMonth = normalizedMonthFromDate(startDate);
+  if (!startMonth) return 1;
+  const [startYear, startMonthNumber] = startMonth.split("-").map(Number);
+  const [payrollYear, payrollMonthNumber] = payrollMonth.split("-").map(Number);
+  return Math.max(
+    0,
+    (payrollYear - startYear) * 12 + payrollMonthNumber - startMonthNumber + 1,
+  );
+}
+
+function bonusForServiceMonth(
+  tiers: AttendanceBonusTier[],
+  serviceMonth: number,
+) {
+  return (
+    tiers.find(
+      (tier) =>
+        tier.active &&
+        serviceMonth >= tier.minMonth &&
+        (tier.maxMonth === null || serviceMonth <= tier.maxMonth),
+    )?.amount ?? 0
+  );
 }
 
 export async function ensureAttendanceSetup(
@@ -245,7 +306,7 @@ export async function getAttendanceData(
   const employeesResult = await database
     .prepare(
       `
-    SELECT id, nickname, team, position, status, email, end_date
+    SELECT id, nickname, team, position, status, email, start_date, end_date
     FROM hr_employees
     WHERE (start_date = '' OR
       CASE WHEN start_date GLOB '??/??/????'
@@ -266,6 +327,7 @@ export async function getAttendanceData(
     team: String(row.team),
     position: String(row.position ?? ""),
     status: String(row.status),
+    startDate: String(row.start_date ?? ""),
     endDate: String(row.end_date ?? ""),
     email: String(row.email ?? ""),
   }));
@@ -277,11 +339,35 @@ export async function getAttendanceData(
               ? employee.team === viewerTeam
               : employee.id === user.employeeId,
           )
-          .map((employee) => ({ ...employee, email: "", endDate: "" }))
+          .map((employee) => ({
+            id: employee.id,
+            nickname: employee.nickname,
+            team: employee.team,
+            position: employee.position,
+            status: employee.status,
+            email: "",
+            endDate: "",
+          }))
       : allEmployees.map((employee) =>
           user.role === "hr"
-            ? employee
-            : { ...employee, email: "", endDate: "" },
+            ? {
+                id: employee.id,
+                nickname: employee.nickname,
+                team: employee.team,
+                position: employee.position,
+                status: employee.status,
+                email: employee.email,
+                endDate: employee.endDate,
+              }
+            : {
+                id: employee.id,
+                nickname: employee.nickname,
+                team: employee.team,
+                position: employee.position,
+                status: employee.status,
+                email: "",
+                endDate: "",
+              },
         );
 
   const selectedEmployeeId =
@@ -363,14 +449,26 @@ export async function getAttendanceData(
     SELECT id, code, name, event_type, trigger_from, action_type, action_value, period, active, built_in
     FROM hr_attendance_rules ORDER BY built_in DESC, id ASC
   `);
+  const bonusTiersStatement = database.prepare(`
+    SELECT id, min_month, max_month, amount, active
+    FROM hr_attendance_bonus_tiers ORDER BY min_month, id
+  `);
 
-  const [recordResult, statusResult, auditResult, auditCountResult, ruleResult] =
+  const [
+    recordResult,
+    statusResult,
+    auditResult,
+    auditCountResult,
+    ruleResult,
+    bonusTierResult,
+  ] =
     await database.batch([
       recordStatement,
       statusStatement,
       auditStatement,
       auditCountStatement,
       rulesStatement,
+      bonusTiersStatement,
     ]);
 
   const records = recordResult.results.map((row) => ({
@@ -422,6 +520,9 @@ export async function getAttendanceData(
   const auditTotal = Number(auditCountResult.results[0]?.count ?? 0);
   const auditPageCount = Math.max(1, Math.ceil(auditTotal / auditPageSize));
   const rules = ruleResult.results.map(mapRule);
+  const bonusTiers = bonusTierResult.results.length
+    ? bonusTierResult.results.map(mapBonusTier)
+    : defaultBonusTiers;
   const selectedRecords = records.filter(
     (record) => record.employeeId === selectedEmployeeId,
   );
@@ -467,16 +568,19 @@ export async function getAttendanceData(
           : 0)
       );
     }, 0);
-  const bonusLoss = rules
+  const forfeitsBonus = rules
     .filter((rule) => rule.active && rule.actionType === "lose_bonus")
-    .filter((rule) => countFor(rule.eventType) >= rule.triggerFrom)
-    .reduce((maximum, rule) => Math.max(maximum, rule.actionValue), 0);
-  const attendanceBonus =
-    bonusLoss > 0
-      ? 0
-      : rules
-          .filter((rule) => rule.active && rule.actionType === "lose_bonus")
-          .reduce((maximum, rule) => Math.max(maximum, rule.actionValue), 0);
+    .some((rule) => countFor(rule.eventType) >= rule.triggerFrom);
+  const selectedEmployee = allEmployees.find(
+    (employee) => employee.id === selectedEmployeeId,
+  );
+  const serviceMonth = serviceMonthFor(selectedEmployee?.startDate, bounds.month);
+  const eligibleAttendanceBonus = bonusForServiceMonth(
+    bonusTiers,
+    serviceMonth,
+  );
+  const bonusLoss = forfeitsBonus ? eligibleAttendanceBonus : 0;
+  const attendanceBonus = forfeitsBonus ? 0 : eligibleAttendanceBonus;
   const plannedWorkingDays = workingDaysInMonth(
     bounds.year,
     bounds.monthNumber,
@@ -493,6 +597,8 @@ export async function getAttendanceData(
     lateRemainingBeforeForceLeave: Math.max(0, forceThreshold - counts.late),
     forcedLeaveDays,
     bonusLoss,
+    serviceMonth,
+    eligibleAttendanceBonus,
     attendanceBonus,
     absenceDeduction,
     totalDeduction: absenceDeduction,
@@ -515,6 +621,7 @@ export async function getAttendanceData(
       pageCount: auditPageCount,
     },
     rules,
+    bonusTiers,
     summary,
   };
 }
@@ -709,29 +816,38 @@ export async function getAttendancePayrollImpact(
 ) {
   const database = getD1();
   const bounds = monthBounds(requestedMonth);
-  const countsRow = await database
-    .prepare(
+  const [countsResult, ruleResult, employeeResult, bonusTierResult] =
+    await database.batch([
+      database
+        .prepare(
       `
     SELECT SUM(CASE WHEN record_type = 'absence' THEN 1 ELSE 0 END) AS absence,
       SUM(CASE WHEN record_type = 'meeting_leave' THEN 1 ELSE 0 END) AS meeting_leave,
       SUM(CASE WHEN record_type = 'late' THEN 1 ELSE 0 END) AS late
     FROM hr_attendance_records WHERE employee_id = ? AND record_date >= ? AND record_date < ?
   `,
-    )
-    .bind(employeeId, bounds.start, bounds.next)
-    .first<Record<string, unknown>>();
+        )
+        .bind(employeeId, bounds.start, bounds.next),
+      database.prepare(
+        `SELECT id, code, name, event_type, trigger_from, action_type, action_value, period, active, built_in
+         FROM hr_attendance_rules WHERE active = 1`,
+      ),
+      database
+        .prepare("SELECT start_date FROM hr_employees WHERE id = ?")
+        .bind(employeeId),
+      database.prepare(
+        `SELECT id, min_month, max_month, amount, active
+         FROM hr_attendance_bonus_tiers WHERE active = 1 ORDER BY min_month, id`,
+      ),
+    ]);
+  const countsRow = countsResult.results[0];
   const counts = {
     absence: Number(countsRow?.absence ?? 0),
     meetingLeave: Number(countsRow?.meeting_leave ?? 0),
     late: Number(countsRow?.late ?? 0),
   };
-  const rows = await database
-    .prepare(
-      `SELECT id, code, name, event_type, trigger_from, action_type, action_value, period, active, built_in FROM hr_attendance_rules WHERE active = 1`,
-    )
-    .all<Record<string, unknown>>();
-  const rules = rows.results.length
-    ? rows.results.map(mapRule)
+  const rules = ruleResult.results.length
+    ? ruleResult.results.map(mapRule)
     : defaultRules.map((rule, index) => ({
         id: index,
         code: rule[0],
@@ -772,19 +888,26 @@ export async function getAttendancePayrollImpact(
           : 0)
       );
     }, 0);
-  const bonusLoss = rules
+  const forfeitsBonus = rules
     .filter(
       (rule) =>
         rule.actionType === "lose_bonus" &&
         countFor(rule.eventType) >= rule.triggerFrom,
     )
-    .reduce((maximum, rule) => Math.max(maximum, rule.actionValue), 0);
-  const attendanceBonus =
-    bonusLoss > 0
-      ? 0
-      : rules
-          .filter((rule) => rule.actionType === "lose_bonus")
-          .reduce((maximum, rule) => Math.max(maximum, rule.actionValue), 0);
+    .length > 0;
+  const bonusTiers = bonusTierResult.results.length
+    ? bonusTierResult.results.map(mapBonusTier)
+    : defaultBonusTiers;
+  const serviceMonth = serviceMonthFor(
+    employeeResult.results[0]?.start_date,
+    bounds.month,
+  );
+  const eligibleAttendanceBonus = bonusForServiceMonth(
+    bonusTiers,
+    serviceMonth,
+  );
+  const bonusLoss = forfeitsBonus ? eligibleAttendanceBonus : 0;
+  const attendanceBonus = forfeitsBonus ? 0 : eligibleAttendanceBonus;
   const plannedWorkingDays = workingDaysInMonth(
     bounds.year,
     bounds.monthNumber,
@@ -797,6 +920,8 @@ export async function getAttendancePayrollImpact(
     ),
     ...counts,
     forcedLeaveDays,
+    serviceMonth,
+    eligibleAttendanceBonus,
     bonusLoss,
     attendanceBonus,
     attendanceDeduction,
@@ -854,7 +979,10 @@ export async function saveAttendanceRule(
   const eventType = String(input.eventType ?? "").trim();
   const actionType = String(input.actionType ?? "").trim();
   const triggerFrom = Math.max(1, Math.round(Number(input.triggerFrom ?? 1)));
-  const actionValue = Math.max(0, Math.round(Number(input.actionValue ?? 0)));
+  const actionValue =
+    actionType === "lose_bonus"
+      ? 0
+      : Math.max(0, Math.round(Number(input.actionValue ?? 0)));
   const active = input.active === false ? 0 : 1;
   if (!name || !eventType || !actionType)
     throw new Error("กรุณากรอกข้อมูลเงื่อนไขให้ครบ");
@@ -895,6 +1023,28 @@ export async function saveAttendanceRule(
     )
     .first<{ id: number }>();
   return { id: Number(row?.id) };
+}
+
+export async function saveAttendanceBonusTier(
+  user: SystemUser,
+  input: Record<string, unknown>,
+) {
+  if (user.role !== "hr")
+    throw new Error("เฉพาะ HR เท่านั้นที่แก้ไขเบี้ยขยันได้");
+  const id = Math.max(1, Math.round(Number(input.id ?? 0)));
+  const amount = Math.max(0, Math.round(Number(input.amount ?? 0)));
+  const active = input.active === false ? 0 : 1;
+  if (!Number.isFinite(amount)) throw new Error("จำนวนเงินเบี้ยขยันไม่ถูกต้อง");
+  const result = await getD1()
+    .prepare(
+      `UPDATE hr_attendance_bonus_tiers
+       SET amount = ?, active = ?, updated_by_email = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? RETURNING id`,
+    )
+    .bind(amount, active, user.email, id)
+    .first<{ id: number }>();
+  if (!result) throw new Error("ไม่พบช่วงอายุงานที่ต้องการแก้ไข");
+  return { id, amount, active: Boolean(active) };
 }
 
 export async function saveSystemUser(

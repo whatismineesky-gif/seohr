@@ -101,6 +101,8 @@ type PayrollData = {
     meetingLeave: number;
     late: number;
     forcedLeaveDays: number;
+    serviceMonth: number;
+    eligibleAttendanceBonus: number;
     bonusLoss: number;
     attendanceBonus: number;
     attendanceDeduction: number;
@@ -1585,6 +1587,9 @@ export function PayrollPanel({ employees }: { employees: Employee[] }) {
                   <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1">
                     <span className="text-emerald-700">
                       เบี้ยขยันที่ได้รับ {money.format(attendanceBonus)}
+                    </span>
+                    <span className="text-slate-600">
+                      อายุงานเดือนที่ {data.attendance.serviceMonth} · สิทธิเต็ม {money.format(data.attendance.eligibleAttendanceBonus)}
                     </span>
                     <span className="text-rose-700">
                       หักตามเงื่อนไข {money.format(attendanceDeduction)}

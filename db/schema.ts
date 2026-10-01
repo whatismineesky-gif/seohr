@@ -92,6 +92,21 @@ export const attendanceRules = sqliteTable(
   ],
 );
 
+export const attendanceBonusTiers = sqliteTable(
+  "hr_attendance_bonus_tiers",
+  {
+    id: integer("id").primaryKey(),
+    minMonth: integer("min_month").notNull(),
+    maxMonth: integer("max_month"),
+    amount: integer("amount").notNull().default(0),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    updatedByEmail: text("updated_by_email").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_attendance_bonus_tier_month").on(table.minMonth)],
+);
+
 export const attendanceRecords = sqliteTable(
   "hr_attendance_records",
   {
