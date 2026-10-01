@@ -40,7 +40,7 @@ function defaultReason(status: ReviewStatus, target: number, submitted: number) 
 async function scopedEmployees(user: SystemUser, reviewDate: string) {
   const database = getD1();
   let scopeSql = "";
-  const bindings: unknown[] = [reviewDate, reviewDate];
+  const bindings: unknown[] = [reviewDate, reviewDate, reviewDate];
   if (user.role === "employee") {
     const viewer = user.employeeId
       ? await database
@@ -64,7 +64,7 @@ async function scopedEmployees(user: SystemUser, reviewDate: string) {
   const result = await database
     .prepare(
       `SELECT id, nickname, team, position
-       FROM hr_employees
+       FROM hr_employees e
        WHERE (start_date = '' OR
          CASE WHEN start_date GLOB '??/??/????'
            THEN substr(start_date, 7, 4) || '-' || substr(start_date, 4, 2) || '-' || substr(start_date, 1, 2)
@@ -73,6 +73,15 @@ async function scopedEmployees(user: SystemUser, reviewDate: string) {
          CASE WHEN end_date GLOB '??/??/????'
            THEN substr(end_date, 7, 4) || '-' || substr(end_date, 4, 2) || '-' || substr(end_date, 1, 2)
            ELSE end_date END >= ?)
+       AND LOWER(REPLACE(REPLACE(TRIM(position), '-', ''), ' ', '')) NOT IN ('parttime', 'freelancer')
+       AND LOWER(REPLACE(REPLACE(TRIM(employment), '-', ''), ' ', '')) NOT IN ('parttime', 'freelancer')
+       AND NOT EXISTS (
+         SELECT 1 FROM hr_attendance_records attendance
+         WHERE attendance.employee_id = e.id
+           AND attendance.record_date = ?
+           AND attendance.record_type = 'absence'
+           AND attendance.source_type <> 'work_audit'
+       )
        ${scopeSql}
        ORDER BY sequence, id`,
     )
