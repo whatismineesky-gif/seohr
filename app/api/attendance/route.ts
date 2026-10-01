@@ -70,6 +70,7 @@ export async function GET(request: NextRequest) {
   try {
     const month = request.nextUrl.searchParams.get("month") ?? "";
     const employeeId = request.nextUrl.searchParams.get("employeeId") ?? undefined;
+    const statusDate = request.nextUrl.searchParams.get("statusDate") ?? undefined;
     const requestedAuditPage = Number(
       request.nextUrl.searchParams.get("auditPage") ?? 1,
     );
@@ -83,6 +84,7 @@ export async function GET(request: NextRequest) {
           month,
           employeeId,
           auditPage,
+          statusDate,
         );
       }),
     );

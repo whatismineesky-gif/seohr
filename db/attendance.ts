@@ -226,6 +226,7 @@ export async function getAttendanceData(
   requestedMonth: string,
   requestedEmployeeId?: string,
   requestedAuditPage = 1,
+  requestedStatusDate?: string,
 ) {
   const database = getD1();
   const bounds = monthBounds(requestedMonth);
@@ -312,8 +313,10 @@ export async function getAttendanceData(
           .bind(bounds.start, bounds.next, user.employeeId ?? "")
       : database.prepare(recordsSql).bind(bounds.start, bounds.next);
 
-  const todayDate = bangkokDateValue();
-  const todaySql = canViewTeamSummary
+  const statusDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedStatusDate ?? "")
+    ? requestedStatusDate!
+    : bangkokDateValue();
+  const statusSql = canViewTeamSummary
     ? `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
        FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
        WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
@@ -327,11 +330,11 @@ export async function getAttendanceData(
          FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
          WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
          ORDER BY e.sequence, r.id`;
-  const todayStatement = canViewTeamSummary
-    ? database.prepare(todaySql).bind(todayDate, viewerTeam)
+  const statusStatement = canViewTeamSummary
+    ? database.prepare(statusSql).bind(statusDate, viewerTeam)
     : user.role === "employee"
-      ? database.prepare(todaySql).bind(todayDate, user.employeeId ?? "")
-      : database.prepare(todaySql).bind(todayDate);
+      ? database.prepare(statusSql).bind(statusDate, user.employeeId ?? "")
+      : database.prepare(statusSql).bind(statusDate);
 
   const auditWhere = `employee_id = ?
     AND ((previous_record_date >= ? AND previous_record_date < ?)
@@ -361,10 +364,10 @@ export async function getAttendanceData(
     FROM hr_attendance_rules ORDER BY built_in DESC, id ASC
   `);
 
-  const [recordResult, todayResult, auditResult, auditCountResult, ruleResult] =
+  const [recordResult, statusResult, auditResult, auditCountResult, ruleResult] =
     await database.batch([
       recordStatement,
-      todayStatement,
+      statusStatement,
       auditStatement,
       auditCountStatement,
       rulesStatement,
@@ -386,7 +389,7 @@ export async function getAttendanceData(
     recorderRole: String(row.recorder_role),
     createdAt: String(row.created_at),
   }));
-  const todayRecords = todayResult.results.map((row) => ({
+  const statusRecords = statusResult.results.map((row) => ({
     employeeId: String(row.employee_id),
     nickname: String(row.nickname ?? ""),
     team: String(row.team ?? ""),
@@ -499,8 +502,8 @@ export async function getAttendanceData(
     currentUser: user,
     month: bounds.month,
     teamSummary: { canView: canViewTeamSummary, team: viewerTeam },
-    todayDate,
-    todayRecords,
+    statusDate,
+    statusRecords,
     selectedEmployeeId,
     employees,
     records,

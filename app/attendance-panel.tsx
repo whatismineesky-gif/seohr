@@ -87,8 +87,8 @@ type AttendanceData = {
   };
   month: string;
   teamSummary: { canView: boolean; team: string };
-  todayDate: string;
-  todayRecords: Array<{
+  statusDate: string;
+  statusRecords: Array<{
     employeeId: string;
     nickname: string;
     team: string;
@@ -416,6 +416,7 @@ export function AttendancePanel() {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [recordDate, setRecordDate] = useState(() => bangkokDateValue());
+  const [statusDate, setStatusDate] = useState(() => bangkokDateValue());
   const [recordType, setRecordType] = useState<EventType>("absence");
   const [reason, setReason] = useState("");
   const [newRule, setNewRule] = useState({
@@ -435,6 +436,7 @@ export function AttendancePanel() {
   const loadData = useCallback(async () => {
     try {
       const params = new URLSearchParams({ month });
+      params.set("statusDate", statusDate);
       if (selectedEmployeeId) params.set("employeeId", selectedEmployeeId);
       params.set("auditPage", String(auditPage));
       let response: Response | null = null;
@@ -474,7 +476,7 @@ export function AttendancePanel() {
     } finally {
       setLoading(false);
     }
-  }, [month, selectedEmployeeId, auditPage]);
+  }, [month, selectedEmployeeId, auditPage, statusDate]);
 
   useEffect(() => {
     const task = window.setTimeout(() => {
@@ -636,14 +638,14 @@ export function AttendancePanel() {
   )
     .slice()
     .sort(compareAttendanceEmployees);
-  const todayAbsenceCount = data.todayRecords.filter(
+  const statusAbsenceCount = data.statusRecords.filter(
     (record) => record.recordType === "absence",
   ).length;
-  const todayMeetingLeaveCount = data.todayRecords.filter(
+  const statusMeetingLeaveCount = data.statusRecords.filter(
     (record) => record.recordType === "meeting_leave",
   ).length;
-  const todayLabel = new Date(
-    `${data.todayDate}T00:00:00Z`,
+  const statusDateLabel = new Date(
+    `${data.statusDate}T00:00:00Z`,
   ).toLocaleDateString("th-TH", {
     day: "numeric",
     month: "long",
@@ -660,6 +662,9 @@ export function AttendancePanel() {
           </TabsTrigger>
           <TabsTrigger value="daily">
             <CalendarDays /> สรุปรายเดือน
+          </TabsTrigger>
+          <TabsTrigger value="daily-status">
+            <CalendarCheck2 /> หยุด / ลาประชุม
           </TabsTrigger>
           {data.currentUser.role === "hr" && (
             <TabsTrigger value="rules">
@@ -688,70 +693,6 @@ export function AttendancePanel() {
       </div>
 
       <TabsContent value="attendance" className="space-y-5">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-slate-500">
-                TODAY ATTENDANCE
-              </p>
-              <h2 className="mt-1 text-xl font-semibold text-slate-950">
-                ผู้หยุดงานและลาประชุมวันนี้
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {todayLabel}
-                {data.teamSummary.canView
-                  ? ` · เฉพาะ${data.teamSummary.team}`
-                  : data.currentUser.role === "employee"
-                    ? " · ข้อมูลของคุณ"
-                    : " · พนักงานทั้งหมด"}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="destructive">
-                หยุดงาน {todayAbsenceCount} คน
-              </Badge>
-              <Badge className="bg-amber-500 text-amber-950">
-                ลาประชุม {todayMeetingLeaveCount} คน
-              </Badge>
-            </div>
-          </div>
-          {data.todayRecords.length ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {data.todayRecords.map((record, index) => (
-                <div
-                  key={`${record.employeeId}-${record.recordType}-${index}`}
-                  className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <strong className="block truncate text-slate-950">
-                        {record.nickname}
-                      </strong>
-                      <span className="text-xs text-slate-500">
-                        {record.employeeId} · {record.team} · {record.position}
-                      </span>
-                    </div>
-                    {record.recordType === "absence" ? (
-                      <Badge variant="destructive">หยุดงาน</Badge>
-                    ) : (
-                      <Badge className="bg-amber-500 text-amber-950">
-                        ลาประชุม
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="mt-3 text-sm text-slate-600">
-                    เหตุผล: {record.reason || "ไม่ระบุ"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm text-emerald-700">
-              วันนี้ยังไม่มีผู้หยุดงานหรือลาประชุม
-            </div>
-          )}
-        </section>
-
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -1188,6 +1129,80 @@ export function AttendancePanel() {
         </div>
       </TabsContent>
 
+      <TabsContent value="daily-status" className="space-y-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-slate-500">
+                DAILY ATTENDANCE STATUS
+              </p>
+              <h2 className="mt-1 text-xl font-semibold text-slate-950">
+                ผู้หยุดงานและลาประชุม
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {statusDateLabel}
+                {data.teamSummary.canView
+                  ? ` · เฉพาะ${data.teamSummary.team}`
+                  : data.currentUser.role === "employee"
+                    ? " · ข้อมูลของคุณ"
+                    : " · พนักงานทั้งหมด"}
+              </p>
+            </div>
+            <label className="field-label w-full sm:w-52">
+              เลือกวันที่
+              <Input
+                type="date"
+                value={statusDate}
+                onChange={(event) => setStatusDate(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Badge variant="destructive">
+              หยุดงาน {statusAbsenceCount} คน
+            </Badge>
+            <Badge className="bg-amber-500 text-amber-950">
+              ลาประชุม {statusMeetingLeaveCount} คน
+            </Badge>
+          </div>
+          {data.statusRecords.length ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {data.statusRecords.map((record, index) => (
+                <div
+                  key={`${record.employeeId}-${record.recordType}-${index}`}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <strong className="block truncate text-slate-950">
+                        {record.nickname}
+                      </strong>
+                      <span className="text-xs text-slate-500">
+                        {record.employeeId} · {record.team} · {record.position}
+                      </span>
+                    </div>
+                    {record.recordType === "absence" ? (
+                      <Badge variant="destructive">หยุดงาน</Badge>
+                    ) : (
+                      <Badge className="bg-amber-500 text-amber-950">
+                        ลาประชุม
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    เหตุผล: {record.reason || "ไม่ระบุ"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm text-emerald-700">
+              วันที่เลือกยังไม่มีผู้หยุดงานหรือลาประชุม
+            </div>
+          )}
+        </section>
+      </TabsContent>
+
       <TabsContent value="daily" className="space-y-5">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div>
@@ -1206,7 +1221,7 @@ export function AttendancePanel() {
           </div>
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <Badge className="bg-emerald-600">ทำงาน</Badge>
-            <Badge variant="destructive">ขาด</Badge>
+            <Badge variant="destructive">หยุด</Badge>
             <Badge className="bg-amber-500 text-amber-950">ลา</Badge>
             <Badge className="bg-violet-600">สาย</Badge>
           </div>
@@ -1215,7 +1230,7 @@ export function AttendancePanel() {
           <div className="border-b border-slate-200 px-5 py-4">
             <h3 className="font-semibold">ตารางประจำเดือน {month}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              ทุกวันของเดือนเป็นวันทำงาน หากไม่มีรายการขาด / ลา / สาย จะแสดง
+              ทุกวันของเดือนเป็นวันทำงาน หากไม่มีรายการหยุด / ลา / สาย จะแสดง
               “ทำงาน”
             </p>
           </div>
@@ -1272,7 +1287,7 @@ export function AttendancePanel() {
                       );
                       const labels = records.map((record) =>
                         record.recordType === "absence"
-                          ? "ขาด"
+                          ? "หยุด"
                           : record.recordType === "meeting_leave"
                             ? "ลา"
                             : "สาย",
@@ -1293,7 +1308,7 @@ export function AttendancePanel() {
                               {labels.map((label, labelIndex) => (
                                 <span
                                   key={`${label}-${labelIndex}`}
-                                  className={`rounded-md px-1 py-1 font-medium ${label === "ขาด" ? "bg-rose-100 text-rose-700" : label === "ลา" ? "bg-amber-100 text-amber-800" : "bg-violet-100 text-violet-700"}`}
+                                  className={`rounded-md px-1 py-1 font-medium ${label === "หยุด" ? "bg-rose-100 text-rose-700" : label === "ลา" ? "bg-amber-100 text-amber-800" : "bg-violet-100 text-violet-700"}`}
                                 >
                                   {label}
                                 </span>
