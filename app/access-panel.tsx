@@ -73,7 +73,7 @@ const menus = [
 const defaults: Record<Role, string[]> = {
   hr: menus.map(([id]) => id),
   audit: ["dashboard", "employees", "members", "attendance"],
-  employee: ["attendance"],
+  employee: ["dashboard", "attendance"],
 };
 
 export function AccessPanel({
@@ -127,7 +127,8 @@ export function AccessPanel({
   }
 
   function togglePermission(menuId: string) {
-    if (form.role === "hr" && menuId === "access") return;
+    if (menuId === "dashboard" || (form.role === "hr" && menuId === "access"))
+      return;
     setForm((current) => ({
       ...current,
       permissions: current.permissions.includes(menuId)
@@ -198,7 +199,7 @@ export function AccessPanel({
         row.team,
         row.username,
         row.password,
-        "ลงเวลางาน",
+        "ภาพรวม, ลงเวลางาน",
       ]),
     ]);
     worksheet["!cols"] = [14, 18, 14, 20, 22, 18].map((wch) => ({ wch }));
@@ -315,7 +316,7 @@ export function AccessPanel({
               <h2>กำหนดสิทธิ์การเข้าเมนู</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 เพิ่มอีเมลผู้ใช้งาน เลือกบทบาท
-                และเปิดเฉพาะเมนูที่ต้องการให้ใช้งาน
+                โดยผู้ใช้ทุกคนจะได้รับสิทธิ์หน้าภาพรวมอัตโนมัติ
               </p>
             </div>
             <ShieldCheck className="text-indigo-600" />
@@ -406,9 +407,22 @@ export function AccessPanel({
                     key={id}
                     type="button"
                     onClick={() => togglePermission(id)}
-                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${selected ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-900" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"}`}
+                    disabled={id === "dashboard"}
+                    title={
+                      id === "dashboard"
+                        ? "ผู้ใช้ทุกคนเข้าถึงหน้าภาพรวมได้"
+                        : undefined
+                    }
+                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${selected ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-900" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"} ${id === "dashboard" ? "cursor-not-allowed opacity-80" : ""}`}
                   >
-                    <span>{label}</span>
+                    <span>
+                      {label}
+                      {id === "dashboard" && (
+                        <span className="ml-2 text-xs font-normal text-indigo-600">
+                          สิทธิ์พื้นฐาน
+                        </span>
+                      )}
+                    </span>
                     <span
                       className={`flex size-6 items-center justify-center rounded-full ${selected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-400"}`}
                     >
@@ -438,7 +452,7 @@ export function AccessPanel({
               <h2>สร้าง User พนักงานแบบกลุ่ม</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Username ใช้รหัสพนักงาน ระบบจะสุ่มรหัสผ่านเฉพาะบุคคล
-                และให้สิทธิ์เฉพาะเมนูลงเวลางาน
+                และให้สิทธิ์เมนูภาพรวมกับลงเวลางาน
               </p>
             </div>
             <div className="relative w-full sm:w-80">

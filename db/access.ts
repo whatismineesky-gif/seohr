@@ -34,13 +34,14 @@ async function hashPassword(password: string) {
 const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
   hr: [...menuIds],
   audit: ["dashboard", "employees", "members", "attendance"],
-  employee: ["attendance"],
+  employee: ["dashboard", "attendance"],
 };
 
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
   try {
     const parsed = JSON.parse(String(value ?? "[]"));
-    if (Array.isArray(parsed) && parsed.length) return menuIds.filter((id) => parsed.includes(id));
+    if (Array.isArray(parsed) && parsed.length)
+      return menuIds.filter((id) => id === "dashboard" || parsed.includes(id));
   } catch { /* ใช้ค่าเริ่มต้นตามบทบาท */ }
   return roleDefaults[role];
 }
@@ -108,6 +109,7 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
   const password = String(input.password ?? "");
   const requested = Array.isArray(input.permissions) ? input.permissions.map(String) : [];
   const permissions = menuIds.filter((id) => requested.includes(id));
+  if (!permissions.includes("dashboard")) permissions.unshift("dashboard");
   if (!email || !email.includes("@")) throw new Error("กรุณาระบุอีเมลให้ถูกต้อง");
   if (!/^[A-Za-z0-9._-]{3,50}$/.test(loginUsername))
     throw new Error("Username ต้องมี 3–50 ตัว และใช้ตัวอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง");
@@ -283,7 +285,7 @@ export async function createEmployeeUsersBulk(
           userId,
           String(employee.nickname || employeeId),
           employeeId,
-          JSON.stringify(["attendance"]),
+          JSON.stringify(["dashboard", "attendance"]),
           username,
         ),
     );
