@@ -185,6 +185,25 @@ function monthBounds(month: string) {
   return { month: valid, start, next, year, monthNumber };
 }
 
+function bangkokDateValue() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function normalizedPosition(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-–—./()]+/g, "");
+}
+
 function workingDaysInMonth(year: number, monthNumber: number) {
   return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
 }
@@ -210,6 +229,18 @@ export async function getAttendanceData(
 ) {
   const database = getD1();
   const bounds = monthBounds(requestedMonth);
+  const viewerEmployee = user.employeeId
+    ? await database
+        .prepare("SELECT team, position FROM hr_employees WHERE id = ?")
+        .bind(user.employeeId)
+        .first<Record<string, unknown>>()
+    : null;
+  const viewerTeam = String(viewerEmployee?.team ?? "");
+  const viewerPosition = normalizedPosition(viewerEmployee?.position);
+  const canViewTeamSummary =
+    user.role === "employee" &&
+    Boolean(viewerTeam) &&
+    new Set(["head", "seniorstaff"]).has(viewerPosition);
   const employeesResult = await database
     .prepare(
       `
@@ -239,7 +270,13 @@ export async function getAttendanceData(
   }));
   const employees =
     user.role === "employee"
-      ? allEmployees.filter((employee) => employee.id === user.employeeId)
+      ? allEmployees
+          .filter((employee) =>
+            canViewTeamSummary
+              ? employee.team === viewerTeam
+              : employee.id === user.employeeId,
+          )
+          .map((employee) => ({ ...employee, email: "", endDate: "" }))
       : allEmployees.map((employee) =>
           user.role === "hr"
             ? employee
@@ -261,15 +298,40 @@ export async function getAttendanceData(
   const auditOffset = (auditPage - 1) * auditPageSize;
 
   const recordsSql =
-    user.role === "employee"
+    canViewTeamSummary
+      ? `SELECT r.*, e.nickname, e.team FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id WHERE r.record_date >= ? AND r.record_date < ? AND e.team = ? ORDER BY r.record_date DESC, r.id DESC`
+      : user.role === "employee"
       ? `SELECT r.*, e.nickname, e.team FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id WHERE r.record_date >= ? AND r.record_date < ? AND r.employee_id = ? ORDER BY r.record_date DESC, r.id DESC`
       : `SELECT r.*, e.nickname, e.team FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id WHERE r.record_date >= ? AND r.record_date < ? ORDER BY r.record_date DESC, r.id DESC`;
   const recordStatement =
-    user.role === "employee"
+    canViewTeamSummary
+      ? database.prepare(recordsSql).bind(bounds.start, bounds.next, viewerTeam)
+      : user.role === "employee"
       ? database
           .prepare(recordsSql)
           .bind(bounds.start, bounds.next, user.employeeId ?? "")
       : database.prepare(recordsSql).bind(bounds.start, bounds.next);
+
+  const todayDate = bangkokDateValue();
+  const todaySql = canViewTeamSummary
+    ? `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
+       FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
+       WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+         AND e.team = ? ORDER BY e.sequence, r.id`
+    : user.role === "employee"
+      ? `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
+         FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
+         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+           AND r.employee_id = ? ORDER BY r.id`
+      : `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
+         FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
+         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+         ORDER BY e.sequence, r.id`;
+  const todayStatement = canViewTeamSummary
+    ? database.prepare(todaySql).bind(todayDate, viewerTeam)
+    : user.role === "employee"
+      ? database.prepare(todaySql).bind(todayDate, user.employeeId ?? "")
+      : database.prepare(todaySql).bind(todayDate);
 
   const auditWhere = `employee_id = ?
     AND ((previous_record_date >= ? AND previous_record_date < ?)
@@ -299,9 +361,10 @@ export async function getAttendanceData(
     FROM hr_attendance_rules ORDER BY built_in DESC, id ASC
   `);
 
-  const [recordResult, auditResult, auditCountResult, ruleResult] =
+  const [recordResult, todayResult, auditResult, auditCountResult, ruleResult] =
     await database.batch([
       recordStatement,
+      todayStatement,
       auditStatement,
       auditCountStatement,
       rulesStatement,
@@ -315,9 +378,21 @@ export async function getAttendanceData(
     recordDate: String(row.record_date),
     recordType: String(row.record_type),
     reason: String(row.reason ?? ""),
-    recorderEmail: String(row.recorder_email),
+    recorderEmail:
+      user.role === "employee" &&
+      String(row.employee_id) !== user.employeeId
+        ? ""
+        : String(row.recorder_email),
     recorderRole: String(row.recorder_role),
     createdAt: String(row.created_at),
+  }));
+  const todayRecords = todayResult.results.map((row) => ({
+    employeeId: String(row.employee_id),
+    nickname: String(row.nickname ?? ""),
+    team: String(row.team ?? ""),
+    position: String(row.position ?? ""),
+    recordType: String(row.record_type),
+    reason: String(row.reason ?? ""),
   }));
 
   const auditLogs = auditResult.results.map((row) => ({
@@ -423,6 +498,9 @@ export async function getAttendanceData(
   return {
     currentUser: user,
     month: bounds.month,
+    teamSummary: { canView: canViewTeamSummary, team: viewerTeam },
+    todayDate,
+    todayRecords,
     selectedEmployeeId,
     employees,
     records,
