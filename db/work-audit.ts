@@ -3,6 +3,13 @@ import { getD1 } from "./index";
 
 type ReviewStatus = "complete" | "incomplete" | "none";
 
+async function runBatches(statements: D1PreparedStatement[]) {
+  const database = getD1();
+  for (let index = 0; index < statements.length; index += 50) {
+    await database.batch(statements.slice(index, index + 50));
+  }
+}
+
 function validDate(value: unknown) {
   const date = String(value ?? "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
@@ -361,7 +368,7 @@ export async function confirmDailyWork(
         reviewDate,
       ),
   ]);
-  await database.batch(reviewStatements);
+  await runBatches(reviewStatements);
 
   const changedReviews = await database
     .prepare("SELECT id, employee_id, result_status, reason FROM hr_daily_work_reviews WHERE review_date = ?")
@@ -421,7 +428,7 @@ export async function confirmDailyWork(
           .bind(reviewId, reviewId),
       ];
     });
-  if (attendanceStatements.length) await database.batch(attendanceStatements);
+  if (attendanceStatements.length) await runBatches(attendanceStatements);
   const payrollImpactIds = new Set(
     changes
       .filter(
