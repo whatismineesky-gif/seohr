@@ -804,7 +804,7 @@ export async function getAttendancePayrollImpact(
   };
 }
 
-async function syncAttendanceToPayroll(
+export async function syncAttendanceToPayroll(
   employeeId: string,
   payrollMonth: string,
 ) {

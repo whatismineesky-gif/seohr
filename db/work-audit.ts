@@ -1,0 +1,440 @@
+import { syncAttendanceToPayroll, type SystemUser } from "./attendance";
+import { getD1 } from "./index";
+
+type ReviewStatus = "complete" | "incomplete" | "none";
+
+function validDate(value: unknown) {
+  const date = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+    throw new Error("กรุณาระบุวันที่ให้ถูกต้อง");
+  return date;
+}
+
+function normalizedPosition(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-–—./()]+/g, "");
+}
+
+function statusFor(submitted: number, target: number): ReviewStatus {
+  if (submitted <= 0) return "none";
+  if (submitted < target) return "incomplete";
+  return "complete";
+}
+
+function defaultReason(status: ReviewStatus, target: number, submitted: number) {
+  if (status === "none") return "ไม่ส่งงาน";
+  if (status === "incomplete")
+    return `ส่งงานไม่ครบ — เว็บไม่เสร็จ ${Math.max(0, target - submitted)} เว็บ`;
+  return "";
+}
+
+async function scopedEmployees(user: SystemUser, reviewDate: string) {
+  const database = getD1();
+  let scopeSql = "";
+  const bindings: unknown[] = [reviewDate, reviewDate];
+  if (user.role === "employee") {
+    const viewer = user.employeeId
+      ? await database
+          .prepare("SELECT team, position FROM hr_employees WHERE id = ?")
+          .bind(user.employeeId)
+          .first<Record<string, unknown>>()
+      : null;
+    const canViewTeam =
+      Boolean(viewer?.team) &&
+      new Set(["head", "seniorstaff"]).has(
+        normalizedPosition(viewer?.position),
+      );
+    if (canViewTeam) {
+      scopeSql = " AND team = ?";
+      bindings.push(String(viewer?.team ?? ""));
+    } else {
+      scopeSql = " AND id = ?";
+      bindings.push(user.employeeId ?? "");
+    }
+  }
+  const result = await database
+    .prepare(
+      `SELECT id, nickname, team, position
+       FROM hr_employees
+       WHERE (start_date = '' OR
+         CASE WHEN start_date GLOB '??/??/????'
+           THEN substr(start_date, 7, 4) || '-' || substr(start_date, 4, 2) || '-' || substr(start_date, 1, 2)
+           ELSE start_date END <= ?)
+       AND (status <> 'ลาออก' OR end_date = '' OR
+         CASE WHEN end_date GLOB '??/??/????'
+           THEN substr(end_date, 7, 4) || '-' || substr(end_date, 4, 2) || '-' || substr(end_date, 1, 2)
+           ELSE end_date END >= ?)
+       ${scopeSql}
+       ORDER BY sequence, id`,
+    )
+    .bind(...bindings)
+    .all<Record<string, unknown>>();
+  return result.results.map((row) => ({
+    id: String(row.id),
+    nickname: String(row.nickname ?? ""),
+    team: String(row.team ?? ""),
+    position: String(row.position ?? ""),
+  }));
+}
+
+export async function getWorkAuditData(
+  user: SystemUser,
+  dateValue: unknown,
+  summaryOnly = false,
+) {
+  const reviewDate = validDate(dateValue);
+  const month = reviewDate.slice(0, 7);
+  const database = getD1();
+  const employees = await scopedEmployees(user, reviewDate);
+  const employeeIds = new Set(employees.map((employee) => employee.id));
+  const [targetResult, reviewResult, configResult] = await database.batch([
+    database
+      .prepare(
+        "SELECT month, target_per_day, updated_by_email, updated_at FROM hr_daily_work_targets WHERE month = ?",
+      )
+      .bind(month),
+    database
+      .prepare(
+        `SELECT id, employee_id, target_count, submitted_count, result_status,
+          reason, attendance_record_id, reviewed_by_name, reviewed_by_email,
+          created_at, updated_at
+         FROM hr_daily_work_reviews WHERE review_date = ?`,
+      )
+      .bind(reviewDate),
+    database.prepare(
+      `SELECT month, target_per_day, updated_by_email, updated_at
+       FROM hr_daily_work_targets ORDER BY month DESC LIMIT 24`,
+    ),
+  ]);
+  const targetRow = targetResult.results[0];
+  const configuredTarget = Number(targetRow?.target_per_day ?? 0);
+  const reviewMap = new Map(
+    reviewResult.results
+      .filter((row) => employeeIds.has(String(row.employee_id)))
+      .map((row) => [String(row.employee_id), row]),
+  );
+  const rows = employees.map((employee) => {
+    const review = reviewMap.get(employee.id);
+    const targetCount = Number(review?.target_count ?? configuredTarget);
+    const submittedCount = Number(review?.submitted_count ?? targetCount);
+    const resultStatus = String(
+      review?.result_status ?? "complete",
+    ) as ReviewStatus;
+    return {
+      ...employee,
+      reviewId: review ? Number(review.id) : null,
+      reviewed: Boolean(review),
+      targetCount,
+      submittedCount,
+      missingCount: Math.max(0, targetCount - submittedCount),
+      resultStatus,
+      reason: String(review?.reason ?? ""),
+      attendanceRecordId: review?.attendance_record_id
+        ? Number(review.attendance_record_id)
+        : null,
+      reviewedBy: String(review?.reviewed_by_name ?? review?.reviewed_by_email ?? ""),
+      updatedAt: String(review?.updated_at ?? ""),
+    };
+  });
+  const summary = {
+    total: rows.length,
+    complete: rows.filter((row) => row.reviewed && row.resultStatus === "complete").length,
+    incomplete: rows.filter((row) => row.reviewed && row.resultStatus === "incomplete").length,
+    none: rows.filter((row) => row.reviewed && row.resultStatus === "none").length,
+    unreviewed: rows.filter((row) => !row.reviewed).length,
+  };
+  let history: Array<Record<string, unknown>> = [];
+  if (!summaryOnly && (user.role === "hr" || user.role === "audit")) {
+    const historyResult = await database
+      .prepare(
+        `SELECT l.*, e.nickname, e.team
+         FROM hr_daily_work_review_logs l
+         JOIN hr_employees e ON e.id = l.employee_id
+         WHERE l.review_date = ? ORDER BY l.created_at DESC, l.id DESC LIMIT 200`,
+      )
+      .bind(reviewDate)
+      .all<Record<string, unknown>>();
+    history = historyResult.results.map((row) => ({
+      id: Number(row.id),
+      reviewId: Number(row.review_id),
+      employeeId: String(row.employee_id),
+      nickname: String(row.nickname ?? ""),
+      team: String(row.team ?? ""),
+      previousStatus: row.previous_status ? String(row.previous_status) : null,
+      previousSubmittedCount:
+        row.previous_submitted_count === null
+          ? null
+          : Number(row.previous_submitted_count),
+      previousReason: String(row.previous_reason ?? ""),
+      newStatus: String(row.new_status),
+      newSubmittedCount: Number(row.new_submitted_count),
+      newReason: String(row.new_reason ?? ""),
+      changeReason: String(row.change_reason ?? ""),
+      actorName: String(row.actor_display_name ?? row.actor_email ?? ""),
+      createdAt: String(row.created_at),
+    }));
+  }
+  return {
+    reviewDate,
+    canReview: user.role === "hr" || user.role === "audit",
+    canConfigure: user.role === "hr",
+    config: targetRow
+      ? {
+          month: String(targetRow.month),
+          targetPerDay: configuredTarget,
+          updatedBy: String(targetRow.updated_by_email ?? ""),
+          updatedAt: String(targetRow.updated_at ?? ""),
+        }
+      : null,
+    configs: summaryOnly
+      ? []
+      : configResult.results.map((row) => ({
+          month: String(row.month),
+          targetPerDay: Number(row.target_per_day),
+          updatedBy: String(row.updated_by_email ?? ""),
+          updatedAt: String(row.updated_at ?? ""),
+        })),
+    summary,
+    dayConfirmed: rows.length > 0 && summary.unreviewed === 0,
+    rows: summaryOnly
+      ? rows.filter(
+          (row) =>
+            row.reviewed &&
+            (row.resultStatus === "incomplete" || row.resultStatus === "none"),
+        )
+      : rows,
+    history,
+  };
+}
+
+export async function saveWorkTarget(
+  user: SystemUser,
+  input: Record<string, unknown>,
+) {
+  if (user.role !== "hr")
+    throw new Error("เฉพาะ HR เท่านั้นที่แก้ไขเป้าหมายส่งงานได้");
+  const month = String(input.month ?? "").trim();
+  const targetPerDay = Math.max(1, Math.round(Number(input.targetPerDay ?? 0)));
+  if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("กรุณาระบุเดือนให้ถูกต้อง");
+  if (!Number.isFinite(targetPerDay) || targetPerDay < 1)
+    throw new Error("เป้าหมายต่อวันต้องอย่างน้อย 1 เว็บ");
+  await getD1()
+    .prepare(
+      `INSERT INTO hr_daily_work_targets (month, target_per_day, updated_by_email)
+       VALUES (?, ?, ?)
+       ON CONFLICT(month) DO UPDATE SET target_per_day = excluded.target_per_day,
+         updated_by_email = excluded.updated_by_email, updated_at = CURRENT_TIMESTAMP`,
+    )
+    .bind(month, targetPerDay, user.email)
+    .run();
+  return { month, targetPerDay };
+}
+
+export async function confirmDailyWork(
+  user: SystemUser,
+  input: Record<string, unknown>,
+) {
+  if (user.role !== "hr" && user.role !== "audit")
+    throw new Error("เฉพาะ HR หรือ Audit เท่านั้นที่ตรวจส่งงานได้");
+  const reviewDate = validDate(input.reviewDate);
+  const database = getD1();
+  const targetRow = await database
+    .prepare("SELECT target_per_day FROM hr_daily_work_targets WHERE month = ?")
+    .bind(reviewDate.slice(0, 7))
+    .first<Record<string, unknown>>();
+  const configuredTarget = Number(targetRow?.target_per_day ?? 0);
+  if (configuredTarget < 1)
+    throw new Error("ยังไม่ได้ตั้งค่าเป้าหมายส่งงานของเดือนนี้");
+  const employees = await scopedEmployees(user, reviewDate);
+  const inputRows = Array.isArray(input.rows)
+    ? (input.rows as Array<Record<string, unknown>>)
+    : [];
+  const inputMap = new Map(
+    inputRows.map((row) => [String(row.employeeId ?? ""), row]),
+  );
+  const existingResult = await database
+    .prepare("SELECT * FROM hr_daily_work_reviews WHERE review_date = ?")
+    .bind(reviewDate)
+    .all<Record<string, unknown>>();
+  const existingMap = new Map(
+    existingResult.results.map((row) => [String(row.employee_id), row]),
+  );
+  const changes: Array<{
+    employeeId: string;
+    targetCount: number;
+    submittedCount: number;
+    resultStatus: ReviewStatus;
+    reason: string;
+    changeReason: string;
+    previous: Record<string, unknown> | undefined;
+  }> = [];
+  for (const employee of employees) {
+    const previous = existingMap.get(employee.id);
+    const row = inputMap.get(employee.id);
+    const targetCount = previous
+      ? Number(previous.target_count)
+      : configuredTarget;
+    const submittedCount = Math.max(
+      0,
+      Math.round(Number(row?.submittedCount ?? targetCount)),
+    );
+    const resultStatus = statusFor(submittedCount, targetCount);
+    const reason =
+      resultStatus === "complete"
+        ? ""
+        : String(row?.reason ?? "").trim() ||
+          defaultReason(resultStatus, targetCount, submittedCount);
+    const changeReason = String(row?.changeReason ?? "").trim();
+    const changed =
+      !previous ||
+      Number(previous.submitted_count) !== submittedCount ||
+      String(previous.result_status) !== resultStatus ||
+      String(previous.reason ?? "") !== reason;
+    if (!changed) continue;
+    if (previous && !changeReason)
+      throw new Error(`กรุณาระบุเหตุผลการแก้ไขของ ${employee.nickname}`);
+    changes.push({
+      employeeId: employee.id,
+      targetCount,
+      submittedCount,
+      resultStatus,
+      reason,
+      changeReason,
+      previous,
+    });
+  }
+  if (!changes.length) return { changed: 0 };
+
+  const reviewStatements = changes.flatMap((change) => [
+    database
+      .prepare(
+        `INSERT INTO hr_daily_work_reviews (
+          employee_id, review_date, target_count, submitted_count, result_status,
+          reason, reviewed_by_user_id, reviewed_by_email, reviewed_by_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(employee_id, review_date) DO UPDATE SET
+          submitted_count = excluded.submitted_count,
+          result_status = excluded.result_status,
+          reason = excluded.reason,
+          reviewed_by_user_id = excluded.reviewed_by_user_id,
+          reviewed_by_email = excluded.reviewed_by_email,
+          reviewed_by_name = excluded.reviewed_by_name,
+          updated_at = CURRENT_TIMESTAMP`,
+      )
+      .bind(
+        change.employeeId,
+        reviewDate,
+        change.targetCount,
+        change.submittedCount,
+        change.resultStatus,
+        change.reason,
+        user.userId,
+        user.email,
+        user.displayName,
+      ),
+    database
+      .prepare(
+        `INSERT INTO hr_daily_work_review_logs (
+          review_id, employee_id, review_date, previous_status,
+          previous_submitted_count, previous_reason, new_status,
+          new_submitted_count, new_reason, change_reason,
+          actor_user_id, actor_email, actor_display_name
+        ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          FROM hr_daily_work_reviews WHERE employee_id = ? AND review_date = ?`,
+      )
+      .bind(
+        change.employeeId,
+        reviewDate,
+        change.previous?.result_status ?? null,
+        change.previous?.submitted_count ?? null,
+        change.previous?.reason ?? null,
+        change.resultStatus,
+        change.submittedCount,
+        change.reason,
+        change.changeReason,
+        user.userId,
+        user.email,
+        user.displayName,
+        change.employeeId,
+        reviewDate,
+      ),
+  ]);
+  await database.batch(reviewStatements);
+
+  const changedReviews = await database
+    .prepare("SELECT id, employee_id, result_status, reason FROM hr_daily_work_reviews WHERE review_date = ?")
+    .bind(reviewDate)
+    .all<Record<string, unknown>>();
+  const changedIds = new Set(changes.map((change) => change.employeeId));
+  const attendanceStatements = changedReviews.results
+    .filter((review) => changedIds.has(String(review.employee_id)))
+    .flatMap((review) => {
+      const reviewId = Number(review.id);
+      if (String(review.result_status) === "complete") {
+        return [
+          database
+            .prepare(
+              "DELETE FROM hr_attendance_records WHERE source_type = 'work_audit' AND source_id = ?",
+            )
+            .bind(reviewId),
+          database
+            .prepare(
+              "UPDATE hr_daily_work_reviews SET attendance_record_id = NULL WHERE id = ?",
+            )
+            .bind(reviewId),
+        ];
+      }
+      const attendanceReason = `ตรวจส่งงาน: ${String(review.reason ?? "ส่งงานไม่ครบ")}`;
+      return [
+        database
+          .prepare(
+            `UPDATE hr_attendance_records SET reason = ?, recorder_user_id = ?,
+              recorder_email = ?, recorder_role = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE source_type = 'work_audit' AND source_id = ?`,
+          )
+          .bind(attendanceReason, user.userId, user.email, user.role, reviewId),
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO hr_attendance_records (
+              employee_id, record_date, record_type, reason, recorder_user_id,
+              recorder_email, recorder_role, source_type, source_id
+            ) VALUES (?, ?, 'absence', ?, ?, ?, ?, 'work_audit', ?)`,
+          )
+          .bind(
+            review.employee_id,
+            reviewDate,
+            attendanceReason,
+            user.userId,
+            user.email,
+            user.role,
+            reviewId,
+          ),
+        database
+          .prepare(
+            `UPDATE hr_daily_work_reviews SET attendance_record_id = (
+              SELECT id FROM hr_attendance_records
+              WHERE source_type = 'work_audit' AND source_id = ? LIMIT 1
+            ) WHERE id = ?`,
+          )
+          .bind(reviewId, reviewId),
+      ];
+    });
+  if (attendanceStatements.length) await database.batch(attendanceStatements);
+  const payrollImpactIds = new Set(
+    changes
+      .filter(
+        (change) =>
+          change.resultStatus !== "complete" ||
+          (change.previous && String(change.previous.result_status) !== "complete"),
+      )
+      .map((change) => change.employeeId),
+  );
+  await Promise.all(
+    [...payrollImpactIds].map((employeeId) =>
+      syncAttendanceToPayroll(employeeId, reviewDate.slice(0, 7)),
+    ),
+  );
+  return { changed: changes.length };
+}

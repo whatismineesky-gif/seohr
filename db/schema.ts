@@ -105,6 +105,8 @@ export const attendanceRecords = sqliteTable(
     recorderUserId: text("recorder_user_id").notNull().default(""),
     recorderEmail: text("recorder_email").notNull(),
     recorderRole: text("recorder_role").notNull(),
+    sourceType: text("source_type").notNull().default("manual"),
+    sourceId: integer("source_id"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -123,6 +125,63 @@ export const attendanceRecords = sqliteTable(
       table.recordDate,
     ),
     index("idx_attendance_date_type").on(table.recordDate, table.recordType),
+    index("idx_attendance_source").on(table.sourceType, table.sourceId),
+  ],
+);
+
+export const dailyWorkTargets = sqliteTable("hr_daily_work_targets", {
+  month: text("month").primaryKey(),
+  targetPerDay: integer("target_per_day").notNull().default(0),
+  updatedByEmail: text("updated_by_email").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const dailyWorkReviews = sqliteTable(
+  "hr_daily_work_reviews",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    employeeId: text("employee_id").notNull().references(() => employees.id),
+    reviewDate: text("review_date").notNull(),
+    targetCount: integer("target_count").notNull().default(0),
+    submittedCount: integer("submitted_count").notNull().default(0),
+    resultStatus: text("result_status").notNull().default("complete"),
+    reason: text("reason").notNull().default(""),
+    attendanceRecordId: integer("attendance_record_id"),
+    reviewedByUserId: text("reviewed_by_user_id").notNull().default(""),
+    reviewedByEmail: text("reviewed_by_email").notNull().default(""),
+    reviewedByName: text("reviewed_by_name").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_daily_work_review_employee_date").on(table.employeeId, table.reviewDate),
+    index("idx_daily_work_review_date_status").on(table.reviewDate, table.resultStatus),
+  ],
+);
+
+export const dailyWorkReviewLogs = sqliteTable(
+  "hr_daily_work_review_logs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    reviewId: integer("review_id").notNull(),
+    employeeId: text("employee_id").notNull().references(() => employees.id),
+    reviewDate: text("review_date").notNull(),
+    previousStatus: text("previous_status"),
+    previousSubmittedCount: integer("previous_submitted_count"),
+    previousReason: text("previous_reason"),
+    newStatus: text("new_status").notNull(),
+    newSubmittedCount: integer("new_submitted_count").notNull(),
+    newReason: text("new_reason").notNull().default(""),
+    changeReason: text("change_reason").notNull().default(""),
+    actorUserId: text("actor_user_id").notNull().default(""),
+    actorEmail: text("actor_email").notNull(),
+    actorDisplayName: text("actor_display_name").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_daily_work_review_logs_date").on(table.reviewDate, table.createdAt),
+    index("idx_daily_work_review_logs_employee").on(table.employeeId, table.createdAt),
   ],
 );
 

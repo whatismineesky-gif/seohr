@@ -280,6 +280,12 @@ export async function deleteEmployee(employeeId: string) {
       .prepare("DELETE FROM hr_attendance_records WHERE employee_id = ?")
       .bind(employeeId),
     database
+      .prepare("DELETE FROM hr_daily_work_review_logs WHERE employee_id = ?")
+      .bind(employeeId),
+    database
+      .prepare("DELETE FROM hr_daily_work_reviews WHERE employee_id = ?")
+      .bind(employeeId),
+    database
       .prepare(
         "DELETE FROM hr_advance_installments WHERE advance_id IN (SELECT id FROM hr_employee_advances WHERE employee_id = ?)",
       )

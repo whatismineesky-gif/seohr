@@ -103,6 +103,7 @@ import { AttendancePanel } from "./attendance-panel";
 import { AdvancePanel, PayrollPanel } from "./payroll-panels";
 import { WarningPanel } from "./warning-panel";
 import { AccessPanel } from "./access-panel";
+import { WorkAuditOverview } from "./work-audit-panel";
 
 type View =
   | "dashboard"
@@ -306,9 +307,11 @@ function SummaryCard({
 function Dashboard({
   employees,
   onNavigate,
+  canOpenAttendance,
 }: {
   employees: Employee[];
   onNavigate: (view: View) => void;
+  canOpenAttendance: boolean;
 }) {
   const activeEmployees = employees.filter(
     (employee) => employee.status === "ยังทำงานอยู่",
@@ -414,6 +417,11 @@ function Dashboard({
           tone="bg-emerald-50 text-emerald-700"
         />
       </div>
+
+      <WorkAuditOverview
+        canOpenAttendance={canOpenAttendance}
+        onOpenAttendance={() => onNavigate("attendance")}
+      />
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
         <section className="panel">
@@ -2364,6 +2372,7 @@ export default function PeopleOSClient() {
           {!accessLoading && access && view === "dashboard" && (
             <Dashboard
               employees={employees}
+              canOpenAttendance={access.permissions.includes("attendance")}
               onNavigate={(next) =>
                 access.permissions.includes(next) && setView(next)
               }

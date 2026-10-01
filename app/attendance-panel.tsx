@@ -16,6 +16,7 @@ import {
   Check,
   CheckCircle2,
   ChevronsUpDown,
+  ClipboardCheck,
   Clock3,
   History,
   Loader2,
@@ -72,6 +73,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkAuditPanel } from "./work-audit-panel";
 
 type Role = "employee" | "hr" | "audit";
 type EventType = "absence" | "meeting_leave" | "late";
@@ -656,7 +658,7 @@ export function AttendancePanel() {
   return (
     <Tabs defaultValue="attendance" className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="attendance">
             <CalendarCheck2 /> ลงเวลาและสรุป
           </TabsTrigger>
@@ -666,6 +668,17 @@ export function AttendancePanel() {
           <TabsTrigger value="daily-status">
             <CalendarCheck2 /> หยุด / ลาประชุม
           </TabsTrigger>
+          {(data.currentUser.role === "hr" ||
+            data.currentUser.role === "audit") && (
+            <TabsTrigger value="work-audit">
+              <ClipboardCheck /> ตรวจส่งงาน
+            </TabsTrigger>
+          )}
+          {data.currentUser.role === "hr" && (
+            <TabsTrigger value="work-target-config">
+              <Settings2 /> เป้าหมายส่งงาน
+            </TabsTrigger>
+          )}
           {data.currentUser.role === "hr" && (
             <TabsTrigger value="rules">
               <Settings2 /> ตั้งค่าเงื่อนไข
@@ -1128,6 +1141,19 @@ export function AttendancePanel() {
           )}
         </div>
       </TabsContent>
+
+      {(data.currentUser.role === "hr" ||
+        data.currentUser.role === "audit") && (
+        <TabsContent value="work-audit" className="space-y-5">
+          <WorkAuditPanel mode="review" />
+        </TabsContent>
+      )}
+
+      {data.currentUser.role === "hr" && (
+        <TabsContent value="work-target-config" className="space-y-5">
+          <WorkAuditPanel mode="config" />
+        </TabsContent>
+      )}
 
       <TabsContent value="daily-status" className="space-y-5">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

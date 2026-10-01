@@ -95,6 +95,7 @@ export function safeApiError(
     "ซ้ำ",
     "สูงสุด",
     "อย่างน้อย",
+    "ยังไม่ได้",
     "ไม่มีสิทธิ์",
     "เฉพาะ HR",
   ].some((text) => message.includes(text));
