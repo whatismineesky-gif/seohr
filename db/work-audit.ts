@@ -87,12 +87,24 @@ async function scopedEmployees(user: SystemUser, reviewDate: string) {
     )
     .bind(...bindings)
     .all<Record<string, unknown>>();
-  return result.results.map((row) => ({
-    id: String(row.id),
-    nickname: String(row.nickname ?? ""),
-    team: String(row.team ?? ""),
-    position: String(row.position ?? ""),
-  }));
+  return result.results
+    .map((row) => ({
+      id: String(row.id),
+      nickname: String(row.nickname ?? ""),
+      team: String(row.team ?? ""),
+      position: String(row.position ?? ""),
+    }))
+    .sort((left, right) => {
+      const teamComparison = left.team.localeCompare(right.team, "th", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      if (teamComparison !== 0) return teamComparison;
+      return left.nickname.localeCompare(right.nickname, "th", {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
 }
 
 export async function getWorkAuditData(
