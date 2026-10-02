@@ -73,7 +73,7 @@ function QuarterSection({ quarter, count, children }: { quarter: number; count: 
     if (target && target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft;
   }
   const columns = <colgroup>{quarterColumnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
-  return <Collapsible defaultOpen={false} asChild>
+  return <Collapsible defaultOpen={true} asChild>
     <section className="panel group/quarter relative min-w-0 p-0! [contain:inline-size]">
       {/* Keep the sticky block outside horizontal scroll containers so it follows page scrolling. */}
       <div className="sticky top-[4.25rem] z-10 rounded-t-[.95rem] bg-white shadow-sm">
