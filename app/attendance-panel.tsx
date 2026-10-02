@@ -578,8 +578,8 @@ export function AttendancePanel() {
 
   const allowedTypes = useMemo<EventType[]>(() => {
     if (data?.currentUser.role === "employee")
-      return ["absence", "meeting_leave"];
-    if (data?.currentUser.role === "audit") return ["absence"];
+      return ["absence", "meeting_leave", "admin", "true"];
+    if (data?.currentUser.role === "audit") return ["absence", "admin", "true"];
     return ["late", "absence", "meeting_leave", "admin", "true"];
   }, [data?.currentUser.role]);
 

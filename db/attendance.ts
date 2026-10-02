@@ -640,11 +640,11 @@ export async function createAttendanceRecord(
       throw new Error(
         "บัญชีของคุณยังไม่เชื่อมกับพนักงาน หรือไม่มีสิทธิ์บันทึกให้ผู้อื่น",
       );
-    if (!new Set(["absence", "meeting_leave"]).has(recordType))
-      throw new Error("พนักงานบันทึกได้เฉพาะหยุดงานหรือลาประชุม");
+    if (!new Set(["absence", "meeting_leave", "admin", "true"]).has(recordType))
+      throw new Error("พนักงานบันทึกได้เฉพาะหยุดงาน ลาประชุม แอดมิน หรือทรู");
   } else if (user.role === "audit") {
-    if (recordType !== "absence")
-      throw new Error("Audit บันทึกได้เฉพาะหยุดงาน");
+    if (!new Set(["absence", "admin", "true"]).has(recordType))
+      throw new Error("Audit บันทึกได้เฉพาะหยุดงาน แอดมิน หรือทรู");
   } else if (!new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)) {
     throw new Error("HR บันทึกได้เฉพาะมาสาย หยุดงาน ลาประชุม แอดมิน หรือทรู");
   }
@@ -696,6 +696,8 @@ async function assertRecordAccess(user: SystemUser, id: number) {
     .bind(id)
     .first<Record<string, unknown>>();
   if (!row) throw new Error("ไม่พบประวัติการลงเวลา");
+  if (user.role === "employee" && (!user.employeeId || String(row.employee_id) !== user.employeeId))
+    throw new Error("พนักงานแก้ไขหรือลบได้เฉพาะรายการของตัวเอง");
   if (user.role !== "hr" && String(row.recorder_user_id) !== user.userId)
     throw new Error("ไม่มีสิทธิ์แก้ไขหรือลบรายการนี้");
   return row;
@@ -715,11 +717,11 @@ export async function updateAttendanceRecord(
   if (!reason) throw new Error("กรุณาระบุเหตุผล");
   if (
     user.role === "employee" &&
-    !new Set(["absence", "meeting_leave"]).has(recordType)
+    !new Set(["absence", "meeting_leave", "admin", "true"]).has(recordType)
   )
-    throw new Error("พนักงานบันทึกได้เฉพาะหยุดงานหรือลาประชุม");
-  if (user.role === "audit" && recordType !== "absence")
-    throw new Error("Audit บันทึกได้เฉพาะหยุดงาน");
+    throw new Error("พนักงานบันทึกได้เฉพาะหยุดงาน ลาประชุม แอดมิน หรือทรู");
+  if (user.role === "audit" && !new Set(["absence", "admin", "true"]).has(recordType))
+    throw new Error("Audit บันทึกได้เฉพาะหยุดงาน แอดมิน หรือทรู");
   if (
     user.role === "hr" &&
     !new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)

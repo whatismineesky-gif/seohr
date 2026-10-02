@@ -231,9 +231,20 @@ test('HR can create and edit admin/true records with audit history, without new 
   assert.equal(log.previous_record_type, 'admin');
   assert.equal(log.new_record_type, 'true');
   assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
+  const employee = { ...hr, userId: 'employee-b', email: 'b@test', role: 'employee', employeeId: 'B' };
+  const audit = { ...hr, userId: 'audit-user', email: 'audit@test', role: 'audit' };
   for (const recordType of ['admin', 'true']) {
-    await assert.rejects(attendance.createAttendanceRecord({ ...hr, role: 'employee', employeeId: 'B' }, { ...input, recordType }), /พนักงานบันทึกได้เฉพาะ/);
-    await assert.rejects(attendance.createAttendanceRecord({ ...hr, role: 'audit' }, { ...input, recordType }), /Audit/);
+    const own = await attendance.createAttendanceRecord(employee, { ...input, recordType });
+    await attendance.updateAttendanceRecord(employee, { ...input, id: own.id, recordType: recordType === 'admin' ? 'true' : 'admin' });
+    const other = await attendance.createAttendanceRecord(audit, { ...input, recordType });
+    await attendance.updateAttendanceRecord(audit, { ...input, id: other.id, recordType });
+    await assert.rejects(attendance.createAttendanceRecord(employee, { ...input, employeeId: 'A', recordType }), /ไม่มีสิทธิ์/);
+    await assert.rejects(attendance.updateAttendanceRecord(employee, { ...input, id: other.id, recordType }), /ไม่มีสิทธิ์/);
+    await attendance.deleteAttendanceRecord(employee, own.id);
+    await attendance.deleteAttendanceRecord(audit, other.id);
   }
+  await assert.rejects(attendance.createAttendanceRecord(employee, { ...input, recordType: 'late' }), /พนักงานบันทึกได้เฉพาะ/);
+  await assert.rejects(attendance.createAttendanceRecord(audit, { ...input, recordType: 'meeting_leave' }), /Audit/);
+  assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
   f.sqlite.close();
 });
