@@ -488,3 +488,15 @@ export const payrollRecords = sqliteTable(
     index("idx_payroll_month").on(table.payrollMonth),
   ],
 );
+
+export const personalNotifications = sqliteTable('hr_notifications', {
+  id: integer('id').primaryKey({ autoIncrement: true }), employeeId: text('employee_id').notNull(),
+  sourceKind: text('source_kind').notNull(), sourceId: integer('source_id').notNull(),
+  actorEmail: text('actor_email').notNull(), actorUserId: text('actor_user_id').notNull().default(''), actorName: text('actor_name').notNull().default(''),
+  eventDate: text('event_date').notNull(), action: text('action').notNull(), details: text('details').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex('hr_notifications_source').on(table.sourceKind, table.sourceId), index('hr_notifications_employee_id').on(table.employeeId, table.id)]);
+export const notificationReads = sqliteTable('hr_notification_reads', {
+  userEmail: text('user_email').notNull(), notificationId: integer('notification_id').notNull().references(() => personalNotifications.id, { onDelete: 'cascade' }),
+  readAt: text('read_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [uniqueIndex('hr_notification_reads_user_notice').on(table.userEmail, table.notificationId)]);

@@ -1,5 +1,7 @@
 "use client";
 
+import { NotificationBell } from "@/components/notification-bell";
+
 import {
   ChangeEvent,
   FormEvent,
@@ -2347,6 +2349,7 @@ export default function PeopleOSClient() {
             >
               ข้อมูลพร้อมใช้งาน
             </Badge>
+            {access && <NotificationBell canOpenRecord={access.permissions.includes("attendance")} onOpenRecord={() => access.permissions.includes("attendance") && setView("attendance")} />}
             <Button variant="ghost" size="icon" aria-label="ตั้งค่า">
               <Settings2 />
             </Button>
