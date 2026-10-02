@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import ts from 'typescript';
 
-test('quarter view has three monthly slots, full MIN total, saved thresholds, and distinct tenure quarters', async () => {
+test('quarter view shows only each employee current tenure quarter for the selected month and preserves history', async () => {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`CREATE TABLE hr_employees (id TEXT PRIMARY KEY, nickname TEXT, team TEXT, start_date TEXT, status TEXT, sequence INTEGER);
     CREATE TABLE hr_warning_configs (tenure_month INTEGER PRIMARY KEY, mid_value INTEGER, min_value INTEGER);
@@ -16,6 +16,7 @@ test('quarter view has three monthly slots, full MIN total, saved thresholds, an
       ('A','2026-02',2,0,30,25,'red',1,2),
       ('A','2026-03',3,60,55,50,'winloss',1,3),
       ('A','2026-04',4,90,75,65,'winloss',2,1),
+      ('A','2026-07',7,250,220,200,'winloss',3,1),
       ('B','2026-04',3,10,50,45,'red',1,3);`);
   const database = {
     prepare(sql) {
@@ -35,7 +36,10 @@ test('quarter view has three monthly slots, full MIN total, saved thresholds, an
   const exports={};
   new Function('require','exports',code)(name=>name==='./index'?{getD1:()=>database}:name==='./employees'?{ensureEmployeesSeeded:async()=>{}}:{},exports);
   const result=await exports.getWarningData('2026-04');
-  const first=result.quarterSummary.find(r=>r.employeeId==='A'&&r.tenureQuarter===1);
+  assert.equal(result.quarterSummary.length,2);
+  assert.deepEqual(result.quarterSummary.map(r=>[r.employeeId,r.tenureQuarter]),[['A',2],['B',1]]);
+  const previous=await exports.getWarningData('2026-03');
+  const first=previous.quarterSummary.find(r=>r.employeeId==='A'&&r.tenureQuarter===1);
   assert.equal(first.minTotal,75);
   assert.equal(first.depositTotal,62);
   assert.equal(first.recordedMonths,3);
@@ -52,6 +56,9 @@ test('quarter view has three monthly slots, full MIN total, saved thresholds, an
   assert.deepEqual(offset.months.map(r=>r.resultMonth),['2026-02','2026-03','2026-04']);
   assert.equal(offset.minTotal,70);
   assert.equal(offset.months[2].depositCount,10);
-  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_monthly_deposit_results').get().count,5);
+  const next=await exports.getWarningData('2026-07');
+  assert.deepEqual(next.quarterSummary.map(r=>[r.employeeId,r.tenureQuarter]),[['A',3]]);
+  assert.deepEqual((await exports.getWarningData('2027-01')).quarterSummary,[]);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_monthly_deposit_results').get().count,6);
   sqlite.close();
 });

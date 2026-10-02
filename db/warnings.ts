@@ -80,7 +80,7 @@ export async function getWarningData(requestedMonth: string) {
     };
   });
   const quarterRows = await database.prepare(`
-    SELECT r.employee_id, e.nickname, e.team, r.tenure_quarter, r.quarter_month,
+    SELECT r.employee_id, e.nickname, e.team, e.start_date, r.tenure_quarter, r.quarter_month,
       r.result_month, r.tenure_month, r.deposit_count, r.mid_value, r.min_value, r.result_type
     FROM hr_monthly_deposit_results r JOIN hr_employees e ON e.id = r.employee_id
     ORDER BY r.tenure_quarter DESC, e.team, e.nickname, r.result_month
@@ -93,6 +93,8 @@ export async function getWarningData(requestedMonth: string) {
   for (const record of quarterRows.results) {
     const employeeId = String(record.employee_id);
     const tenureQuarter = Number(record.tenure_quarter);
+    const currentQuarter = Math.ceil(tenureAt(String(record.start_date ?? ""), month) / 3);
+    if (tenureQuarter !== currentQuarter) continue;
     const key = `${employeeId}:${tenureQuarter}`;
     let quarter = quarters.get(key);
     if (!quarter) {
