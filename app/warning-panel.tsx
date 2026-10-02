@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, Loader2, Save, Settings2, ShieldAlert, Trash2, Trophy, Upload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,6 +53,49 @@ function monthLabel(month: string) {
 
 function normalize(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, "").toLowerCase();
+}
+
+const quarterColumnWidths = [200, 160, 160, 160, 120, 120, 160, 180];
+
+function QuarterColumns({ quarter }: { quarter: number }) {
+  return <TableRow className="bg-slate-50">
+    <TableHead scope="col">พนักงาน</TableHead>
+    {[1, 2, 3].map((slot) => <TableHead scope="col" key={slot} className="text-center">เดือนที่ {slot}<span className="block text-xs font-normal">อายุงานเดือนที่ {(quarter - 1) * 3 + slot}</span></TableHead>)}
+    <TableHead scope="col" className="text-right">ฝากรวม</TableHead><TableHead scope="col" className="text-right">MIN รวม</TableHead>
+    <TableHead scope="col">ใบเหลือง / ใบแดง</TableHead><TableHead scope="col">ผลรวม</TableHead>
+  </TableRow>;
+}
+
+function QuarterSection({ quarter, count, children }: { quarter: number; count: number; children: ReactNode }) {
+  const headerScroll = useRef<HTMLDivElement>(null);
+  const bodyScroll = useRef<HTMLDivElement>(null);
+  function syncScroll(source: HTMLDivElement, target: HTMLDivElement | null) {
+    if (target && target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft;
+  }
+  const columns = <colgroup>{quarterColumnWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>;
+  return <Collapsible defaultOpen={false} asChild>
+    <section className="panel group/quarter relative min-w-0 p-0">
+      {/* Keep the sticky block outside horizontal scroll containers so it follows page scrolling. */}
+      <div className="sticky top-[4.25rem] z-10 rounded-t-[.95rem] bg-white shadow-sm">
+        <div className="panel-heading px-6 py-5">
+          <div><p className="section-kicker">TENURE QUARTER {quarter}</p><h2>ไตรมาส {quarter}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">อายุงานเดือนที่ {(quarter - 1) * 3 + 1}–{quarter * 3} · {count} คน</p>
+          </div>
+          <CollapsibleTrigger asChild><Button variant="outline" className="group shrink-0" aria-label={`ยุบหรือขยายไตรมาส ${quarter}`}><span className="group-data-[state=open]:hidden">ขยาย</span><span className="hidden group-data-[state=open]:inline">ยุบ</span><ChevronDown className="transition-transform group-data-[state=open]:rotate-180" /></Button></CollapsibleTrigger>
+        </div>
+        <div ref={headerScroll} onScroll={(event) => syncScroll(event.currentTarget, bodyScroll.current)} className="overflow-x-auto border-t group-data-[state=closed]/quarter:hidden" aria-hidden="true">
+          <table className="w-full min-w-[1260px] table-fixed text-sm">{columns}<TableHeader><QuarterColumns quarter={quarter} /></TableHeader></table>
+        </div>
+      </div>
+      <CollapsibleContent>
+        <div ref={bodyScroll} onScroll={(event) => syncScroll(event.currentTarget, headerScroll.current)} className="overflow-x-auto rounded-b-[.95rem]">
+          <table className="w-full min-w-[1260px] table-fixed text-sm" aria-label={`ยอดฝากไตรมาส ${quarter}`}>
+            {columns}<TableHeader className="sr-only"><QuarterColumns quarter={quarter} /></TableHeader>{children}
+          </table>
+        </div>
+      </CollapsibleContent>
+    </section>
+  </Collapsible>;
 }
 
 export function WarningPanel({ canEdit }: { canEdit: boolean }) {
@@ -232,22 +275,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
         </section>
         {!quarterGroups.length && <section className="panel py-12 text-center text-muted-foreground">ยังไม่มีข้อมูลรายไตรมาส</section>}
         {quarterGroups.map(([quarter, items]) => (
-          <Collapsible key={`${month}-${quarter}`} defaultOpen={false} asChild>
-          <section className="panel overflow-hidden p-0">
-            <div className="panel-heading px-6 py-5">
-              <div><p className="section-kicker">TENURE QUARTER {quarter}</p><h2>ไตรมาส {quarter}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">อายุงานเดือนที่ {(quarter - 1) * 3 + 1}–{quarter * 3} · {items.length} คน</p>
-              </div>
-              <CollapsibleTrigger asChild><Button variant="outline" className="group shrink-0" aria-label={`ยุบหรือขยายไตรมาส ${quarter}`}><span className="group-data-[state=open]:hidden">ขยาย</span><span className="hidden group-data-[state=open]:inline">ยุบ</span><ChevronDown className="transition-transform group-data-[state=open]:rotate-180" /></Button></CollapsibleTrigger>
-            </div>
-            <CollapsibleContent>
-            <div className="border-t [&>[data-slot=table-container]]:max-h-[65vh] [&>[data-slot=table-container]]:overflow-auto"><Table>
-              <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50 [&_th]:shadow-[0_1px_0_0_var(--color-border)]"><TableRow className="bg-slate-50">
-                <TableHead className="min-w-40">พนักงาน</TableHead>
-                {[1, 2, 3].map((slot) => <TableHead key={slot} className="min-w-36 text-center">เดือนที่ {slot}<span className="block text-xs font-normal">อายุงานเดือนที่ {(quarter - 1) * 3 + slot}</span></TableHead>)}
-                <TableHead className="text-right">ฝากรวม</TableHead><TableHead className="text-right">MIN รวม</TableHead>
-                <TableHead>ใบเหลือง / ใบแดง</TableHead><TableHead className="min-w-36">ผลรวม</TableHead>
-              </TableRow></TableHeader>
+          <QuarterSection key={`${month}-${quarter}`} quarter={quarter} count={items.length}>
               <TableBody>{items.map((item) => <TableRow key={item.employeeId}>
                 <TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.employeeId} · {item.team}</div></TableCell>
                 {item.months.map((detail) => <TableCell key={detail.tenureMonth} className="text-center">
@@ -264,10 +292,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
                 <TableCell>{item.recordedMonths < 3 ? <Badge variant="outline">บันทึก {item.recordedMonths}/3 เดือน</Badge>
                   : item.depositTotal > item.minTotal ? <Badge className="bg-emerald-600">ผ่าน MIN รวม</Badge> : <Badge variant="destructive">ไม่ผ่าน MIN รวม</Badge>}</TableCell>
               </TableRow>)}</TableBody>
-            </Table></div>
-            </CollapsibleContent>
-          </section>
-          </Collapsible>
+          </QuarterSection>
         ))}
       </TabsContent>
 
