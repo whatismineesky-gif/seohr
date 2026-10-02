@@ -80,7 +80,7 @@ export async function getWarningData(requestedMonth: string) {
     };
   });
   const quarterRows = await database.prepare(`
-    SELECT r.employee_id, e.nickname, e.team, r.tenure_quarter, r.quarter_month,
+    SELECT r.employee_id, e.nickname, e.team, e.start_date, r.tenure_quarter, r.quarter_month,
       r.result_month, r.tenure_month, r.deposit_count, r.mid_value, r.min_value, r.result_type
     FROM hr_monthly_deposit_results r JOIN hr_employees e ON e.id = r.employee_id
     ORDER BY r.tenure_quarter DESC, e.team, e.nickname, r.result_month
@@ -115,8 +115,10 @@ export async function getWarningData(requestedMonth: string) {
     const anchor = year * 12 + monthNumber - 1 - ((tenure - 1) % 3);
     ensureQuarter(String(employee.id), String(employee.nickname), String(employee.team), Math.ceil(tenure / 3), anchor);
   }
-  // Keep every recorded quarter, including historical records of resigned employees.
+  // Only use deposits from each employee's current tenure quarter for the selected month.
   for (const record of quarterRows.results) {
+    const currentQuarter = Math.ceil(tenureAt(String(record.start_date ?? ""), month) / 3);
+    if (Number(record.tenure_quarter) !== currentQuarter) continue;
     const [recordYear, recordMonth] = String(record.result_month).split("-").map(Number);
     const anchor = recordYear * 12 + recordMonth - 1 - (Number(record.quarter_month) - 1);
     const quarter = ensureQuarter(String(record.employee_id), String(record.nickname), String(record.team), Number(record.tenure_quarter), anchor);

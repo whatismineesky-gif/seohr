@@ -203,7 +203,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
 
       <TabsContent value="quarter" className="space-y-5">
         <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
-          <p className="mb-2 font-medium">แสดงทุกไตรมาสที่มีข้อมูล และพนักงานที่ยังทำงานอยู่ในไตรมาสตามอายุงาน ณ เดือนประเมิน ({monthLabel(month)})</p>
+          <p className="mb-2 font-medium">พนักงานแต่ละคนแสดงเฉพาะไตรมาสล่าสุดตามอายุงาน ณ เดือนประเมิน ({monthLabel(month)}) แม้ยังไม่บันทึกยอดฝาก</p>
           ไตรมาสนับตามอายุงาน: เดือนที่ 1–3 เป็นไตรมาส 1, เดือนที่ 4–6 เป็นไตรมาส 2 และเริ่มนับใบเหลือง/ใบแดงใหม่ทุกไตรมาส
           <p className="mt-2">MIN รวม = MIN ทั้ง 3 เดือนของไตรมาส · สีเขียว: ผ่าน/WINLOSS · สีเหลือง: ใบเหลือง · สีแดง: ใบแดง · —: ยังไม่บันทึก</p>
         </section>

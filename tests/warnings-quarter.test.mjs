@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import ts from 'typescript';
 
-test('quarter view includes every recorded quarter and active employees without deposits', async () => {
+test('each employee appears only in their current tenure quarter, including active employees without deposits', async () => {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`CREATE TABLE hr_employees (id TEXT PRIMARY KEY, nickname TEXT, team TEXT, start_date TEXT, status TEXT, sequence INTEGER);
     CREATE TABLE hr_warning_configs (tenure_month INTEGER PRIMARY KEY, mid_value INTEGER, min_value INTEGER);
@@ -39,7 +39,9 @@ test('quarter view includes every recorded quarter and active employees without 
   const exports={};
   new Function('require','exports',code)(name=>name==='./index'?{getD1:()=>database}:name==='./employees'?{ensureEmployeesSeeded:async()=>{}}:{},exports);
   const result=await exports.getWarningData('2026-04');
-  assert.equal(result.quarterSummary.length,6);
+  assert.equal(result.quarterSummary.length,3);
+  assert.equal(new Set(result.quarterSummary.map(r=>r.employeeId)).size,3);
+  assert.deepEqual(result.quarterSummary.map(r=>[r.employeeId,r.tenureQuarter]),[['A',2],['B',1],['C',2]]);
   const blank=result.quarterSummary.find(r=>r.employeeId==='C');
   assert.equal(blank.tenureQuarter,2);
   assert.equal(blank.recordedMonths,0);
@@ -48,7 +50,7 @@ test('quarter view includes every recorded quarter and active employees without 
   assert.deepEqual(blank.months.map(r=>r.depositCount),[null,null,null]);
   assert.deepEqual(blank.months.map(r=>r.resultType),[null,null,null]);
   assert.deepEqual(blank.months.map(r=>r.resultMonth),['2026-04','2026-05','2026-06']);
-  assert.equal(result.quarterSummary.find(r=>r.employeeId==='D').recordedMonths,1);
+  assert.equal(result.quarterSummary.some(r=>r.employeeId==='D'),false);
   assert.equal(result.rows.some(r=>r.employeeId==='D'),false);
   const previous=await exports.getWarningData('2026-03');
   const first=previous.quarterSummary.find(r=>r.employeeId==='A'&&r.tenureQuarter===1);
@@ -69,7 +71,9 @@ test('quarter view includes every recorded quarter and active employees without 
   assert.equal(offset.minTotal,70);
   assert.equal(offset.months[2].depositCount,10);
   const next=await exports.getWarningData('2026-07');
-  assert.deepEqual(next.quarterSummary.filter(r=>r.employeeId==='A').map(r=>r.tenureQuarter).sort(),[1,2,3]);
+  assert.deepEqual(next.quarterSummary.filter(r=>r.employeeId==='A').map(r=>r.tenureQuarter),[3]);
+  assert.equal(new Set(next.quarterSummary.map(r=>r.employeeId)).size,next.quarterSummary.length);
+  assert.equal(next.quarterSummary.find(r=>r.employeeId==='B').recordedMonths,0);
   assert.equal(next.quarterSummary.find(r=>r.employeeId==='C').tenureQuarter,3);
   const newYear=await exports.getWarningData('2027-01');
   assert.deepEqual(newYear.quarterSummary.find(r=>r.employeeId==='C').months.map(r=>r.resultMonth),['2027-01','2027-02','2027-03']);
