@@ -18,7 +18,7 @@ function fixture() {
   );
   INSERT INTO hr_employees (id, sequence, nickname, team) VALUES
     ('A', 1, 'A', 'SEO 1'), ('B', 2, 'B', 'SEO 1'), ('C', 3, 'C', 'SEO 2');`);
-  for (const file of ['1014_daily_work_audit.sql', '1018_employee_daily_work_targets.sql']) {
+  for (const file of ['1014_daily_work_audit.sql', '1018_employee_daily_work_targets.sql', '1019_daily_work_review_target_logs.sql']) {
     sqlite.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   const database = {
@@ -56,7 +56,7 @@ function fixture() {
 }
 const hr = { role: 'hr', userId: 'hr1', email: 'hr@example.test', displayName: 'HR' };
 
-test('individual targets apply from their date, shared defaults and saved snapshots remain intact', async () => {
+test('individual targets apply from their date, shared defaults and confirmed results recalculate with audit history', async () => {
   const f = fixture();
   await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 3 });
   await f.saveEmployeeWorkTarget(hr, { employeeId: 'B', effectiveDate: '2026-10-02', targetPerDay: 1 });
@@ -74,21 +74,21 @@ test('individual targets apply from their date, shared defaults and saved snapsh
   assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS count FROM hr_attendance_records').get().count, 1);
   assert.deepEqual(f.payroll, [['C', '2026-10']]);
   await f.saveEmployeeWorkTarget(hr, { employeeId: 'B', effectiveDate: '2026-10-02', targetPerDay: 2 });
-  assert.deepEqual(await targets('2026-10-02'), [3, 1, 5]);
+  assert.deepEqual(await targets('2026-10-02'), [3, 2, 5]);
   assert.deepEqual(await targets('2026-10-03'), [3, 2, 5]);
   await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows: [
     { employeeId: 'A', submittedCount: 3 },
     { employeeId: 'B', submittedCount: 2, changeReason: 'แก้จำนวนส่งจริง' },
     { employeeId: 'C', submittedCount: 4 },
   ] });
-  assert.equal((await f.getWorkAuditData(hr, '2026-10-02')).rows[1].targetCount, 1);
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-02')).rows[1].targetCount, 2);
   assert.equal((await f.getWorkAuditData(hr, '2026-10-02')).rows[1].resultStatus, 'complete');
   await f.saveEmployeeWorkTarget(hr, { employeeId: 'B', effectiveDate: '2026-10-04', targetPerDay: null });
   assert.deepEqual(await targets('2026-10-03'), [3, 2, 5]);
   assert.deepEqual(await targets('2026-10-04'), [3, 3, 5]);
   await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 4 });
   assert.deepEqual(await targets('2026-10-04'), [4, 4, 5]);
-  assert.deepEqual(await targets('2026-10-02'), [3, 1, 5]);
+  assert.deepEqual(await targets('2026-10-02'), [3, 2, 5]);
   const config = await f.getWorkAuditData(hr, '2026-10-04');
   assert.equal(config.employeeTargetConfigs.length, 3);
   assert.equal(config.employeeTargetHistory.length, 4);
@@ -117,5 +117,48 @@ test('target writes validate permission, employee, date and positive integer; co
   assert.equal(employeeData.rows[0].targetCount, 1);
   assert.deepEqual(employeeData.targetEmployees, []);
   assert.deepEqual(employeeData.employeeTargetHistory, []);
+  f.sqlite.close();
+});
+
+test('setting a lower target after confirmation removes work-audit absence and resyncs payroll only for that employee', async () => {
+  const f = fixture();
+  await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 3 });
+  const rows = [ { employeeId: 'A', submittedCount: 3 }, { employeeId: 'B', submittedCount: 1 }, { employeeId: 'C', submittedCount: 2 } ];
+  await f.confirmDailyWork(hr, { reviewDate: '2026-10-01', rows });
+  await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows });
+  f.payroll.length = 0;
+  await f.saveEmployeeWorkTarget(hr, { employeeId: 'B', effectiveDate: '2026-10-02', targetPerDay: 1 });
+  const current = await f.getWorkAuditData(hr, '2026-10-02');
+  assert.equal(current.rows[1].targetCount, 1);
+  assert.equal(current.rows[1].submittedCount, 1);
+  assert.equal(current.rows[1].resultStatus, 'complete');
+  assert.equal(current.rows[2].submittedCount, 2);
+  assert.equal(current.rows[2].resultStatus, 'incomplete');
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-01')).rows[1].targetCount, 3);
+  assert.deepEqual(f.payroll, [['B', '2026-10']]);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM hr_attendance_records WHERE employee_id = 'B' AND record_date = '2026-10-02'").get().count, 0);
+  const log = current.history.find(item => item.employeeId === 'B');
+  assert.equal(log.previousTargetCount, 3);
+  assert.equal(log.newTargetCount, 1);
+  assert.equal(log.changeReason, 'ปรับเป้าหมายตาม Config เฉพาะพนักงาน');
+  f.sqlite.close();
+});
+
+test('existing overrides show new targets and can reconfirm without changing actual submissions', async () => {
+  const f = fixture();
+  await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 3 });
+  await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows: [
+    { employeeId: 'A', submittedCount: 3 }, { employeeId: 'B', submittedCount: 1 }, { employeeId: 'C', submittedCount: 3 }
+  ] });
+  f.sqlite.prepare("INSERT INTO hr_employee_daily_work_targets (employee_id, effective_date, target_per_day) VALUES ('B', '2026-10-02', 1)").run();
+  const preview = await f.getWorkAuditData(hr, '2026-10-02');
+  assert.equal(preview.rows[1].targetCount, 1);
+  assert.equal(preview.rows[1].targetPending, true);
+  assert.equal(preview.rows[1].resultStatus, 'complete');
+  const savedSummary = await f.getWorkAuditData(hr, '2026-10-02', true);
+  assert.equal(savedSummary.rows[0].targetCount, 3);
+  await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows: preview.rows.map(row => ({ employeeId: row.id, submittedCount: row.submittedCount, reason: row.reason })) });
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-02')).rows[1].targetPending, false);
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-02', true)).rows.length, 0);
   f.sqlite.close();
 });

@@ -128,7 +128,7 @@ export async function getWorkAuditData(
   const database = getD1();
   const employees = await scopedEmployees(user, reviewDate);
   const employeeIds = new Set(employees.map((employee) => employee.id));
-  const [targetResult, reviewResult, configResult] = await database.batch([
+  const [targetResult, reviewResult, configResult] = await database.batch<Record<string, unknown>>([
     database
       .prepare(
         "SELECT month, target_per_day, updated_by_email, updated_at FROM hr_daily_work_targets WHERE month = ?",
@@ -157,20 +157,28 @@ export async function getWorkAuditData(
   );
   const rows = employees.map((employee) => {
     const review = reviewMap.get(employee.id);
-    const targetCount = Number(review?.target_count ?? employeeTargets.get(employee.id) ?? configuredTarget);
+    const savedTarget = Number(review?.target_count ?? employeeTargets.get(employee.id) ?? configuredTarget);
+    const targetCount = !summaryOnly && employeeTargets.has(employee.id)
+      ? Number(employeeTargets.get(employee.id) ?? configuredTarget) : savedTarget;
+    const targetPending = Boolean(review && targetCount !== savedTarget);
     const submittedCount = Number(review?.submitted_count ?? targetCount);
     const resultStatus = String(
-      review?.result_status ?? "complete",
+      targetPending ? statusFor(submittedCount, targetCount) : review?.result_status ?? "complete",
     ) as ReviewStatus;
     return {
       ...employee,
       reviewId: review ? Number(review.id) : null,
       reviewed: Boolean(review),
       targetCount,
+      targetPending,
       submittedCount,
       missingCount: Math.max(0, targetCount - submittedCount),
       resultStatus,
-      reason: String(review?.reason ?? ""),
+      reason: targetPending
+        ? resultStatus === "complete" ? ""
+          : String(review?.reason ?? "") && String(review?.reason) !== defaultReason(String(review?.result_status) as ReviewStatus, savedTarget, submittedCount)
+            ? String(review?.reason) : defaultReason(resultStatus, targetCount, submittedCount)
+        : String(review?.reason ?? ""),
       attendanceRecordId: review?.attendance_record_id
         ? Number(review.attendance_record_id)
         : null,
@@ -232,6 +240,8 @@ export async function getWorkAuditData(
           ? null
           : Number(row.previous_submitted_count),
       previousReason: String(row.previous_reason ?? ""),
+      previousTargetCount: row.previous_target_count == null ? null : Number(row.previous_target_count),
+      newTargetCount: row.new_target_count == null ? null : Number(row.new_target_count),
       newStatus: String(row.new_status),
       newSubmittedCount: Number(row.new_submitted_count),
       newReason: String(row.new_reason ?? ""),
@@ -326,12 +336,25 @@ export async function saveEmployeeWorkTarget(user: SystemUser, input: Record<str
       target_per_day = excluded.target_per_day, updated_by_email = excluded.updated_by_email,
       updated_at = CURRENT_TIMESTAMP`).bind(employeeId, effectiveDate, targetPerDay, user.email),
   ]);
+  const affected = await database.prepare(
+    "SELECT * FROM hr_daily_work_reviews WHERE employee_id = ? AND review_date >= ? ORDER BY review_date",
+  ).bind(employeeId, effectiveDate).all<Record<string, unknown>>();
+  for (const review of affected.results) {
+    const automaticReason = defaultReason(String(review.result_status) as ReviewStatus, Number(review.target_count), Number(review.submitted_count));
+    await confirmDailyWork(user, {
+      reviewDate: String(review.review_date),
+      rows: [{ employeeId, submittedCount: Number(review.submitted_count),
+        reason: String(review.reason ?? "") === automaticReason ? "" : String(review.reason ?? ""),
+        changeReason: "ปรับเป้าหมายตาม Config เฉพาะพนักงาน" }],
+    }, employeeId);
+  }
   return { employeeId, effectiveDate, targetPerDay };
 }
 
 export async function confirmDailyWork(
   user: SystemUser,
   input: Record<string, unknown>,
+  onlyEmployeeId?: string,
 ) {
   if (user.role !== "hr" && user.role !== "audit")
     throw new Error("เฉพาะ HR หรือ Audit เท่านั้นที่ตรวจส่งงานได้");
@@ -345,7 +368,7 @@ export async function confirmDailyWork(
   const employeeTargets = await employeeTargetsFor(reviewDate);
   if (configuredTarget < 1)
     throw new Error("ยังไม่ได้ตั้งค่าเป้าหมายส่งงานของเดือนนี้");
-  const employees = await scopedEmployees(user, reviewDate);
+  const employees = (await scopedEmployees(user, reviewDate)).filter((employee) => !onlyEmployeeId || employee.id === onlyEmployeeId);
   const inputRows = Array.isArray(input.rows)
     ? (input.rows as Array<Record<string, unknown>>)
     : [];
@@ -371,9 +394,10 @@ export async function confirmDailyWork(
   for (const employee of employees) {
     const previous = existingMap.get(employee.id);
     const row = inputMap.get(employee.id);
-    const targetCount = previous
-      ? Number(previous.target_count)
-      : employeeTargets.get(employee.id) ?? configuredTarget;
+    const targetCount = employeeTargets.has(employee.id)
+      ? employeeTargets.get(employee.id) ?? configuredTarget
+      : previous ? Number(previous.target_count) : configuredTarget;
+    const targetChanged = Boolean(previous && Number(previous.target_count) !== targetCount);
     const submittedCount = Math.max(
       0,
       Math.round(Number(row?.submittedCount ?? targetCount)),
@@ -384,9 +408,11 @@ export async function confirmDailyWork(
         ? ""
         : String(row?.reason ?? "").trim() ||
           defaultReason(resultStatus, targetCount, submittedCount);
-    const changeReason = String(row?.changeReason ?? "").trim();
+    const changeReason = String(row?.changeReason ?? "").trim() ||
+      (targetChanged && Number(previous?.submitted_count) === submittedCount ? "ปรับเป้าหมายตาม Config เฉพาะพนักงาน" : "");
     const changed =
       !previous ||
+      targetChanged ||
       Number(previous.submitted_count) !== submittedCount ||
       String(previous.result_status) !== resultStatus ||
       String(previous.reason ?? "") !== reason;
@@ -413,6 +439,7 @@ export async function confirmDailyWork(
           reason, reviewed_by_user_id, reviewed_by_email, reviewed_by_name
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(employee_id, review_date) DO UPDATE SET
+          target_count = excluded.target_count,
           submitted_count = excluded.submitted_count,
           result_status = excluded.result_status,
           reason = excluded.reason,
@@ -439,7 +466,8 @@ export async function confirmDailyWork(
           previous_submitted_count, previous_reason, new_status,
           new_submitted_count, new_reason, change_reason,
           actor_user_id, actor_email, actor_display_name
-        ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          , previous_target_count, new_target_count
+        ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           FROM hr_daily_work_reviews WHERE employee_id = ? AND review_date = ?`,
       )
       .bind(
@@ -455,6 +483,8 @@ export async function confirmDailyWork(
         user.userId,
         user.email,
         user.displayName,
+        change.previous?.target_count ?? null,
+        change.targetCount,
         change.employeeId,
         reviewDate,
       ),

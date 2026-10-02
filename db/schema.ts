@@ -251,6 +251,8 @@ export const dailyWorkReviewLogs = sqliteTable(
     reviewDate: text("review_date").notNull(),
     previousStatus: text("previous_status"),
     previousSubmittedCount: integer("previous_submitted_count"),
+    previousTargetCount: integer("previous_target_count"),
+    newTargetCount: integer("new_target_count"),
     previousReason: text("previous_reason"),
     newStatus: text("new_status").notNull(),
     newSubmittedCount: integer("new_submitted_count").notNull(),

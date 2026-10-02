@@ -37,6 +37,7 @@ type WorkAuditRow = {
   reviewId: number | null;
   reviewed: boolean;
   targetCount: number;
+  targetPending: boolean;
   submittedCount: number;
   missingCount: number;
   resultStatus: ReviewStatus;
@@ -87,6 +88,8 @@ type WorkAuditData = {
     team: string;
     previousStatus: ReviewStatus | null;
     previousSubmittedCount: number | null;
+    previousTargetCount: number | null;
+    newTargetCount: number | null;
     previousReason: string;
     newStatus: ReviewStatus;
     newSubmittedCount: number;
@@ -203,6 +206,13 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     return () => window.clearTimeout(task);
   }, [loadData]);
 
+  useEffect(() => {
+    if (mode !== "review") return;
+    const refreshTargets = () => void loadData();
+    window.addEventListener("work-audit-targets-updated", refreshTargets);
+    return () => window.removeEventListener("work-audit-targets-updated", refreshTargets);
+  }, [loadData, mode]);
+
   const teams = useMemo(
     () =>
       Array.from(new Set((data?.rows ?? []).map((row) => row.team))).sort(
@@ -244,6 +254,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     const status = resultFor(draft.submittedCount, row.targetCount);
     const reason = status === "complete" ? "" : draft.reason.trim();
     return (
+      row.targetPending ||
       row.submittedCount !== draft.submittedCount ||
       row.resultStatus !== status ||
       row.reason !== reason
@@ -254,7 +265,9 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     if (!data?.config) return toast.error("กรุณาตั้งค่าเป้าหมายของเดือนนี้ก่อน");
     const missingChangeReason = data.rows.find(
       (row) =>
-        row.reviewed && isChanged(row) && !drafts[row.id]?.changeReason.trim(),
+        row.reviewed && isChanged(row) &&
+        !(row.targetPending && drafts[row.id]?.submittedCount === row.submittedCount && drafts[row.id]?.reason === row.reason) &&
+        !drafts[row.id]?.changeReason.trim(),
     );
     if (missingChangeReason)
       return toast.error(`กรุณาระบุเหตุผลการแก้ไขของ ${missingChangeReason.nickname}`);
@@ -326,6 +339,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "บันทึกเป้าหมายเฉพาะไม่สำเร็จ");
       toast.success(useSharedTarget ? "ตั้งให้กลับไปใช้ค่ากลางแล้ว" : "บันทึกเป้าหมายเฉพาะแล้ว");
+      window.dispatchEvent(new Event("work-audit-targets-updated"));
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ");
@@ -389,7 +403,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
         </section>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="font-semibold">เป้าหมายเฉพาะพนักงาน</h3>
-          <p className="mt-1 text-sm text-slate-500">เพิ่มเฉพาะคนที่ต่างจากค่ากลาง มีผลตั้งแต่วันที่เลือกจนกว่าจะเปลี่ยนค่า ผลตรวจที่บันทึกแล้วคงเป้าหมายเดิม</p>
+          <p className="mt-1 text-sm text-slate-500">เพิ่มเฉพาะคนที่ต่างจากค่ากลาง มีผลตั้งแต่วันที่เลือกจนกว่าจะเปลี่ยนค่า ระบบปรับผลตรวจที่บันทึกแล้วและรายการหักที่เกี่ยวข้อง โดยคงจำนวนเว็บที่ส่งจริงและเก็บประวัติ</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="field-label">
               พนักงาน
@@ -558,6 +572,11 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
             </select>
           </div>
           <div className="max-h-[62vh] overflow-auto">
+            {data.rows.some((row) => row.targetPending) && (
+              <p className="border-b border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                เป้าหมายเฉพาะเปลี่ยนจากผลตรวจเดิม กดยืนยันผลตรวจทั้งวันเพื่อบันทึกผลใหม่และปรับรายการหักที่เกี่ยวข้อง
+              </p>
+            )}
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-slate-50">
                 <TableRow>
@@ -593,6 +612,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                       </TableCell>
                       <TableCell className="text-center font-semibold">
                         {row.targetCount}
+                        {row.targetPending && <span className="block text-xs font-normal text-amber-700">รอยืนยันเป้าหมายใหม่</span>}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -703,6 +723,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                       {item.previousStatus ? `${item.previousSubmittedCount ?? 0} เว็บ` : "ตรวจครั้งแรก"}
                     </span>
                     <span className="block font-medium">→ {item.newSubmittedCount} เว็บ</span>
+                    {item.newTargetCount !== null && <span className="block text-xs text-slate-500">เป้าหมาย {item.previousTargetCount ?? "—"} → {item.newTargetCount} เว็บ</span>}
                   </TableCell>
                   <TableCell>{item.newReason || "ส่งครบ"}</TableCell>
                   <TableCell>{item.changeReason || "—"}</TableCell>
