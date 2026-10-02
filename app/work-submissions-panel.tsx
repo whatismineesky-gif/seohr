@@ -32,6 +32,7 @@ export function WorkSubmissionsPanel() {
   const [scope, setScope] = useState('mine');
   const [team, setTeam] = useState('');
   const [page, setPage] = useState(1);
+  const [reportDate, setReportDate] = useState(today);
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -53,6 +54,7 @@ export function WorkSubmissionsPanel() {
       try {
         const params = new URLSearchParams({ scope, page: String(page) });
         if (scope === 'team') params.set('team', team);
+        if (reportDate) params.set('date', reportDate);
         const response = await fetch(`/api/work-submissions?${params}`, { cache: 'no-store', signal: controller.signal });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'โหลดรายการส่งงานไม่สำเร็จ');
@@ -63,7 +65,7 @@ export function WorkSubmissionsPanel() {
     }
     void load();
     return () => controller.abort();
-  }, [scope, team, page, refresh]);
+  }, [scope, team, page, refresh, reportDate]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,20 +78,21 @@ export function WorkSubmissionsPanel() {
       toast.success(`คุณได้ทำการส่งงานแล้ว จำนวน ${result.count} เว็บ`);
       window.dispatchEvent(new Event('work-submitted'));
       setEntries([newEntry(String(nextId.current++))]);
-      setScope('mine'); setPage(1); setRefresh(current => current + 1); setTab('list');
+      setScope('mine'); setReportDate(''); setPage(1); setRefresh(current => current + 1); setTab('list');
     } catch (failure) { toast.error(failure instanceof Error ? failure.message : 'บันทึกการส่งงานไม่สำเร็จ'); }
     finally { setSaving(false); }
   }
 
-  async function exportReport() {
+  async function exportReport(format: 'csv' | 'xlsx') {
     setExporting(true);
     try {
-      const params = new URLSearchParams({ scope, export: 'csv' });
+      const params = new URLSearchParams({ scope, export: format });
       if (scope === 'team') params.set('team', team);
+      if (reportDate) params.set('date', reportDate);
       const response = await fetch(`/api/work-submissions?${params}`, { cache: 'no-store' });
       if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Export รายงานไม่สำเร็จ'); }
       const url = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `work-submissions-${today()}.csv`;
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `work-submissions-${reportDate || 'all-dates'}.${format}`;
       document.body.appendChild(anchor); anchor.click(); anchor.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success('Export รายงานแล้ว');
     } catch (failure) { toast.error(failure instanceof Error ? failure.message : 'Export รายงานไม่สำเร็จ'); }
@@ -132,8 +135,10 @@ export function WorkSubmissionsPanel() {
     </TabsContent>
     <TabsContent value="list">
       <section className="panel min-w-0">
-        <div className="panel-heading mb-4 flex-wrap"><div><p className="section-kicker">WORK SUBMISSIONS</p><h2>ข้อมูลการส่งงาน</h2><p className="mt-1 text-xs text-muted-foreground">Export ตามตัวกรอง · เรียงตามทีมและชื่อ</p></div><div className="flex gap-2"><Button variant="outline" disabled={loading} onClick={() => setRefresh(current => current + 1)}>รีเฟรช</Button><Button disabled={loading || exporting} onClick={() => void exportReport()}>{exporting ? <Loader2 className="animate-spin" /> : <Download />} Export รายงาน</Button></div></div>
+        <div className="panel-heading mb-4 flex-wrap"><div><p className="section-kicker">WORK SUBMISSIONS</p><h2>ข้อมูลการส่งงาน</h2><p className="mt-1 text-xs text-muted-foreground">Export ตามวันที่และตัวกรอง · เรียงตามทีมและชื่อ</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" disabled={loading} onClick={() => setRefresh(current => current + 1)}>รีเฟรช</Button><Button variant="outline" disabled={loading || exporting} onClick={() => void exportReport('csv')}><Download /> Export CSV</Button><Button disabled={loading || exporting} onClick={() => void exportReport('xlsx')}>{exporting ? <Loader2 className="animate-spin" /> : <Download />} Export Excel</Button></div></div>
         <div className="mb-4 flex flex-wrap gap-3">
+          <label className="grid min-w-44 gap-2 text-sm font-medium">วันที่ส่งงาน<Input type="date" min="1900-01-01" value={reportDate} onChange={e => { setReportDate(e.target.value); setPage(1); }} /></label>
+          <div className="flex items-end"><Button variant="outline" disabled={!reportDate} onClick={() => { setReportDate(''); setPage(1); }}>ทุกวันที่</Button></div>
           <div className="min-w-44"><Dropdown id="submission-scope" label="ตัวกรอง" value={scope} options={[{value:'mine',label:'ของฉัน'},{value:'team',label:'รายทีม'},{value:'all',label:'ทั้งหมด'}]} onChange={next => {
             setScope(next); setPage(1);
             if (next === 'team' && !team) setTeam(data?.currentUser.team || data?.teams[0]?.value || '__unassigned__');

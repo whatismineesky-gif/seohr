@@ -101,5 +101,16 @@ test('submission ownership, team filters, pagination and validation use authenti
   assert.ok(csv.includes('"comma,""quoted"""'));
   const teamCSV=await api.exportWorkSubmissions(a,new URLSearchParams('scope=team&team=ทีม 10'));
   assert.equal(teamCSV.includes('"ทีม 2"'),false); assert.equal(teamCSV.split('\r\n').length,2);
+  const dated=await api.getWorkSubmissions(a,new URLSearchParams('scope=all&date=2026-10-02'));
+  assert.equal(dated.total,1);assert.equal(dated.items[0].type,'301');
+  assert.equal((await api.getWorkSubmissions(a,new URLSearchParams('scope=mine&date=2026-10-02'))).total,0);
+  const report=await api.workSubmissionReport(a,new URLSearchParams('scope=team&team=ทีม 2&date=2026-10-02'));
+  assert.equal(report.length,2);assert.equal(report[1][1],'บี');assert.equal(report[1][4],'2026-10-02');
+  const dateCSV=await api.exportWorkSubmissions(a,new URLSearchParams('scope=all&date=2026-10-02'));
+  assert.equal(dateCSV.includes('2026-10-03'),false);assert.equal(dateCSV.split('\r\n').length,2);
+  const empty=await api.workSubmissionReport(a,new URLSearchParams('scope=all&date=2026-10-04'));
+  assert.equal(empty.length,1);
+  await assert.rejects(api.getWorkSubmissions(a,new URLSearchParams('date=2026-02-30')));
+  await assert.rejects(api.workSubmissionReport(a,new URLSearchParams('date=wrong')));
   sqlite.close();
 });
