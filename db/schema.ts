@@ -146,6 +146,9 @@ export const attendanceRecords = sqliteTable(
 
 export const checkinConfig = sqliteTable("hr_checkin_config", {
   id: integer("id").primaryKey(),
+  systemEnabled: integer("system_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
   otherMeetingStart: text("other_meeting_start").notNull().default("12:00"),
   staffMeetingStart: text("staff_meeting_start").notNull().default("13:00"),
   meetingLateAfter: text("meeting_late_after").notNull().default("13:05"),

@@ -30,6 +30,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type Config = {
+  systemEnabled: boolean;
   otherMeetingStart: string;
   staffMeetingStart: string;
   meetingLateAfter: string;
@@ -182,6 +183,17 @@ export function CheckinPanel() {
       </div>
 
       <TabsContent value="checkin" className="space-y-5">
+        {!config.systemEnabled && (
+          <section className="panel flex items-start gap-3 border-amber-200 bg-amber-50">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <div>
+              <h3 className="font-semibold text-amber-900">ระบบเช็คชื่อยังไม่เปิดใช้งาน</h3>
+              <p className="mt-1 text-sm text-amber-800">
+                หน้านี้อยู่ระหว่างการพัฒนาเพื่อรออนุมัติ ผู้ใช้งานยังไม่ต้องเช็คชื่อในระบบตอนนี้
+              </p>
+            </div>
+          </section>
+        )}
         <section className="panel overflow-hidden bg-gradient-to-br from-indigo-950 via-indigo-900 to-violet-800 text-white">
           <div className="flex flex-wrap items-center justify-between gap-5">
             <div>
@@ -258,6 +270,7 @@ export function CheckinPanel() {
         <section className="panel">
           <div className="panel-heading"><div><p className="section-kicker">CHECK-IN CONFIG</p><h2>ตั้งค่าเวลาเช็คชื่อ</h2><p className="mt-1 text-sm text-muted-foreground">เวลาในระบบทั้งหมดอ้างอิงเขตเวลา Asia/Bangkok</p></div><Settings2 className="text-indigo-600" /></div>
           <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <label className="flex items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:col-span-2 xl:col-span-3"><span><strong className="block text-sm text-amber-900">เปิดใช้งานระบบเช็คชื่อ</strong><small className="text-amber-700">เปิดเมื่อได้รับอนุมัติให้เริ่มใช้งานจริงแล้วเท่านั้น</small></span><input type="checkbox" className="size-5 accent-indigo-600" checked={config.systemEnabled} onChange={(event) => setConfig({ ...config, systemEnabled: event.target.checked })} /></label>
             <label className="field-label">พนักงานตำแหน่งอื่นเริ่มเข้าประชุม<Input type="time" value={config.otherMeetingStart} onChange={(event) => setConfig({ ...config, otherMeetingStart: event.target.value })} /></label>
             <label className="field-label">ตำแหน่ง Staff เริ่มเข้าประชุม<Input type="time" value={config.staffMeetingStart} onChange={(event) => setConfig({ ...config, staffMeetingStart: event.target.value })} /></label>
             <label className="field-label">เวลาตัดเป็นมาสาย<Input type="time" value={config.meetingLateAfter} onChange={(event) => setConfig({ ...config, meetingLateAfter: event.target.value })} /></label>

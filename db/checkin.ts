@@ -2,6 +2,7 @@ import { getD1 } from "./index";
 import { syncAttendanceToPayroll, type SystemUser } from "./attendance";
 
 type CheckinConfig = {
+  systemEnabled: boolean;
   otherMeetingStart: string;
   staffMeetingStart: string;
   meetingLateAfter: string;
@@ -11,6 +12,7 @@ type CheckinConfig = {
 };
 
 const defaultConfig: CheckinConfig = {
+  systemEnabled: false,
   otherMeetingStart: "12:00",
   staffMeetingStart: "13:00",
   meetingLateAfter: "13:05",
@@ -63,6 +65,7 @@ function validTime(value: unknown) {
 function mapConfig(row?: Record<string, unknown>): CheckinConfig {
   if (!row) return defaultConfig;
   return {
+    systemEnabled: Boolean(row.system_enabled),
     otherMeetingStart: String(row.other_meeting_start ?? defaultConfig.otherMeetingStart),
     staffMeetingStart: String(row.staff_meeting_start ?? defaultConfig.staffMeetingStart),
     meetingLateAfter: String(row.meeting_late_after ?? defaultConfig.meetingLateAfter),
@@ -90,9 +93,9 @@ async function getConfig() {
   const database = getD1();
   await database.prepare(`
     INSERT OR IGNORE INTO hr_checkin_config (
-      id, other_meeting_start, staff_meeting_start, meeting_late_after,
+      id, system_enabled, other_meeting_start, staff_meeting_start, meeting_late_after,
       meeting_answers_open, work_end_start, work_end_deadline
-    ) VALUES (1, '12:00', '13:00', '13:05', 1, '00:00', '06:00')
+    ) VALUES (1, 0, '12:00', '13:00', '13:05', 1, '00:00', '06:00')
   `).run();
   return mapConfig(
     await database
@@ -188,16 +191,22 @@ export async function getCheckinData(user: SystemUser) {
     history,
     availability: {
       meetingStart,
-      meetingCanStart: Boolean(employee) && !todaySession?.meetingStartedAt && now.minutes >= timeToMinutes(meetingStart),
+      meetingCanStart: config.systemEnabled && Boolean(employee) && !todaySession?.meetingStartedAt && now.minutes >= timeToMinutes(meetingStart),
       meetingWouldBeLate: now.minutes > timeToMinutes(config.meetingLateAfter),
       meetingCanEnd: Boolean(
-        employee &&
+        config.systemEnabled &&
+          employee &&
           config.meetingAnswersOpen &&
           todaySession?.meetingStartedAt &&
           !todaySession.meetingEndedAt,
       ),
       workEndAvailable,
-      workCanEnd: Boolean(employee && workEndAvailable && !checkoutSession?.workEndedAt),
+      workCanEnd: Boolean(
+        config.systemEnabled &&
+          employee &&
+          workEndAvailable &&
+          !checkoutSession?.workEndedAt,
+      ),
     },
   };
 }
@@ -205,6 +214,8 @@ export async function getCheckinData(user: SystemUser) {
 export async function startMeeting(user: SystemUser) {
   const employee = await employeeFor(user);
   const config = await getConfig();
+  if (!config.systemEnabled)
+    throw new Error("ระบบเช็คชื่อยังไม่เปิดใช้งาน");
   const now = bangkokNow();
   const isStaff = employee.position.trim().toLowerCase() === "staff";
   const allowedFrom = isStaff ? config.staffMeetingStart : config.otherMeetingStart;
@@ -244,6 +255,8 @@ export async function startMeeting(user: SystemUser) {
 export async function endMeeting(user: SystemUser, input: Record<string, unknown>) {
   const employee = await employeeFor(user);
   const config = await getConfig();
+  if (!config.systemEnabled)
+    throw new Error("ระบบเช็คชื่อยังไม่เปิดใช้งาน");
   if (!config.meetingAnswersOpen)
     throw new Error("ขณะนี้ปิดรับคำตอบหลังประชุม");
   const answer = String(input.answer ?? "").trim();
@@ -264,6 +277,8 @@ export async function endMeeting(user: SystemUser, input: Record<string, unknown
 export async function endWork(user: SystemUser) {
   const employee = await employeeFor(user);
   const config = await getConfig();
+  if (!config.systemEnabled)
+    throw new Error("ระบบเช็คชื่อยังไม่เปิดใช้งาน");
   const now = bangkokNow();
   const start = timeToMinutes(config.workEndStart);
   const deadline = timeToMinutes(config.workEndDeadline);
@@ -298,10 +313,11 @@ export async function saveCheckinConfig(
     throw new Error("เวลาสิ้นสุดการกดเลิกงานต้องไม่ก่อนเวลาเริ่ม");
   await getD1().prepare(`
     INSERT INTO hr_checkin_config (
-      id, other_meeting_start, staff_meeting_start, meeting_late_after,
+      id, system_enabled, other_meeting_start, staff_meeting_start, meeting_late_after,
       meeting_answers_open, work_end_start, work_end_deadline, updated_by_email
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      system_enabled = excluded.system_enabled,
       other_meeting_start = excluded.other_meeting_start,
       staff_meeting_start = excluded.staff_meeting_start,
       meeting_late_after = excluded.meeting_late_after,
@@ -311,6 +327,7 @@ export async function saveCheckinConfig(
       updated_by_email = excluded.updated_by_email,
       updated_at = CURRENT_TIMESTAMP
   `).bind(
+    input.systemEnabled ? 1 : 0,
     otherMeetingStart,
     staffMeetingStart,
     meetingLateAfter,
