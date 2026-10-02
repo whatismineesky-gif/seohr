@@ -110,6 +110,7 @@ import { WarningPanel } from "./warning-panel";
 import { AccessPanel } from "./access-panel";
 import { WorkAuditOverview } from "./work-audit-panel";
 import { CheckinPanel } from "./checkin-panel";
+import { WorkSubmissionsPanel } from "./work-submissions-panel";
 
 type View =
   | "dashboard"
@@ -117,6 +118,7 @@ type View =
   | "members"
   | "checkin"
   | "attendance"
+  | "submissions"
   | "resignations"
   | "advances"
   | "warnings"
@@ -199,6 +201,7 @@ const navItems = [
   { id: "members" as View, label: "MEMBER", icon: UserRoundCheck },
   { id: "checkin" as View, label: "เช็คชื่อ", icon: CalendarCheck },
   { id: "attendance" as View, label: "ลงเวลางาน", icon: Clock3 },
+  { id: "submissions" as View, label: "ตารางส่งงานใหม่", icon: FileSpreadsheet },
   { id: "resignations" as View, label: "แจ้งลาออก", icon: UserMinus },
   { id: "advances" as View, label: "บันทึกรายการเบิก", icon: Banknote },
   { id: "warnings" as View, label: "บันทึกใบเตือน", icon: ShieldAlert },
@@ -238,6 +241,11 @@ const viewTitles: Record<
     title: "ลงเวลางาน",
     description:
       "บันทึกและติดตามวันทำงาน หยุดงาน ลาประชุม มาสาย พร้อมคำนวณสิทธิ์คงเหลืออัตโนมัติ",
+  },
+  submissions: {
+    eyebrow: "WORK SUBMISSIONS",
+    title: "ตารางส่งงานใหม่",
+    description: "บันทึกคีย์ เว็บ และประเภทงาน พร้อมดูรายการของฉัน รายทีม หรือทั้งหมด",
   },
   resignations: {
     eyebrow: "OFFBOARDING",
@@ -2428,6 +2436,7 @@ export default function PeopleOSClient() {
             <AttendancePanel />
           )}
           {!accessLoading && access && view === "checkin" && <CheckinPanel />}
+          {!accessLoading && access && view === "submissions" && <WorkSubmissionsPanel />}
           {!accessLoading && access && view === "resignations" && (
             <Directory
               employees={employees}

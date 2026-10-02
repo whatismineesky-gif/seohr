@@ -44,6 +44,24 @@ export const employees = sqliteTable(
   ],
 );
 
+export const workSubmissions = sqliteTable("hr_work_submissions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  keyword: text("keyword").notNull(),
+  website: text("website").notNull(),
+  workDate: text("work_date").notNull(),
+  parentWebsite: text("parent_website").notNull(),
+  submissionType: text("submission_type").notNull(),
+  employeeId: text("employee_id").references(() => employees.id),
+  team: text("team").notNull().default(""),
+  authorEmail: text("author_email").notNull(),
+  authorName: text("author_name").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  index("idx_work_submissions_date").on(table.workDate, table.id),
+  index("idx_work_submissions_author").on(table.authorEmail, table.workDate, table.id),
+  index("idx_work_submissions_team").on(table.team, table.workDate, table.id),
+]);
+
 export const systemUsers = sqliteTable(
   "hr_system_users",
   {

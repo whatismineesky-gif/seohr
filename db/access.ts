@@ -2,7 +2,7 @@ import { getD1 } from "./index";
 import { ensureEmployeesSeeded } from "./employees";
 import { ensureAttendanceSetup, type AuthUser, type SystemUser } from "./attendance";
 
-export const menuIds = ["dashboard", "employees", "members", "checkin", "attendance", "resignations", "advances", "warnings", "payroll", "data", "access"] as const;
+export const menuIds = ["dashboard", "employees", "members", "checkin", "attendance", "submissions", "resignations", "advances", "warnings", "payroll", "data", "access"] as const;
 export type MenuId = typeof menuIds[number];
 
 const passwordEncoder = new TextEncoder();
@@ -33,8 +33,8 @@ async function hashPassword(password: string) {
 
 const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
   hr: [...menuIds],
-  audit: ["dashboard", "employees", "members", "checkin", "attendance"],
-  employee: ["dashboard", "checkin", "attendance"],
+  audit: ["dashboard", "employees", "members", "checkin", "attendance", "submissions"],
+  employee: ["dashboard", "checkin", "attendance", "submissions"],
 };
 
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
@@ -290,7 +290,7 @@ export async function createEmployeeUsersBulk(
           userId,
           String(employee.nickname || employeeId),
           employeeId,
-          JSON.stringify(["dashboard", "checkin", "attendance"]),
+          JSON.stringify(["dashboard", "checkin", "attendance", "submissions"]),
           username,
         ),
     );

@@ -63,6 +63,7 @@ const menus = [
   ["members", "MEMBER"],
   ["checkin", "เช็คชื่อ"],
   ["attendance", "ลงเวลางาน"],
+  ["submissions", "ตารางส่งงานใหม่"],
   ["resignations", "แจ้งลาออก"],
   ["advances", "บันทึกรายการเบิก"],
   ["warnings", "บันทึกใบเตือน"],
@@ -73,8 +74,8 @@ const menus = [
 
 const defaults: Record<Role, string[]> = {
   hr: menus.map(([id]) => id),
-  audit: ["dashboard", "employees", "members", "checkin", "attendance"],
-  employee: ["dashboard", "checkin", "attendance"],
+  audit: ["dashboard", "employees", "members", "checkin", "attendance", "submissions"],
+  employee: ["dashboard", "checkin", "attendance", "submissions"],
 };
 
 export function AccessPanel({
