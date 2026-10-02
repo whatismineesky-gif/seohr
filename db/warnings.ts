@@ -12,7 +12,7 @@ const DEFAULT_CONFIG = [
 
 function validMonth(value: unknown) {
   const result = String(value ?? "").trim();
-  if (!/^\d{4}-\d{2}$/.test(result)) throw new Error("กรุณาระบุเดือนให้ถูกต้อง");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(result)) throw new Error("กรุณาระบุเดือนให้ถูกต้อง");
   return result;
 }
 
@@ -130,7 +130,7 @@ export async function getWarningData(requestedMonth: string) {
     };
   }
   return {
-    month, configs, rows,
+    month, configs, rows, savedRecordCount: saved.results.length,
     quarterSummary: [...quarters.values()].map((quarter) => ({
       ...quarter,
       depositTotal: quarter.months.reduce((total, item) => total + (item.depositCount ?? 0), 0),
@@ -217,6 +217,16 @@ export async function deleteWarningRow(input: Input) {
   await database.batch([
     database.prepare("DELETE FROM hr_monthly_deposit_results WHERE employee_id = ? AND result_month = ?").bind(employeeId, month),
     database.prepare("DELETE FROM hr_warning_records WHERE employee_id = ? AND warning_date = ? AND note = 'AUTO_DEPOSIT_KPI'").bind(employeeId, `${month}-01`),
+  ]);
+  return getWarningData(month);
+}
+
+export async function deleteWarningMonth(input: Input) {
+  const month = validMonth(input.month);
+  const database = getD1();
+  await database.batch([
+    database.prepare("DELETE FROM hr_monthly_deposit_results WHERE result_month = ?").bind(month),
+    database.prepare("DELETE FROM hr_warning_records WHERE warning_date = ? AND note = 'AUTO_DEPOSIT_KPI'").bind(`${month}-01`),
   ]);
   return getWarningData(month);
 }

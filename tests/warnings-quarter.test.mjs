@@ -78,5 +78,22 @@ test('each employee appears only in their current tenure quarter, including acti
   const newYear=await exports.getWarningData('2027-01');
   assert.deepEqual(newYear.quarterSummary.find(r=>r.employeeId==='C').months.map(r=>r.resultMonth),['2027-01','2027-02','2027-03']);
   assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_monthly_deposit_results').get().count,7);
+  // Bulk deletion includes resigned employees but preserves other months and manual warnings.
+  sqlite.exec(`CREATE TABLE hr_warning_records (employee_id TEXT, warning_date TEXT, note TEXT);
+    INSERT INTO hr_monthly_deposit_results VALUES ('D','2026-04',4,0,75,65,'red',2,1);
+    INSERT INTO hr_warning_records VALUES ('A','2026-04-01','AUTO_DEPOSIT_KPI'),
+      ('B','2026-04-01','AUTO_DEPOSIT_KPI'),('D','2026-04-01','AUTO_DEPOSIT_KPI'),
+      ('A','2026-04-01','MANUAL'),('A','2026-02-01','AUTO_DEPOSIT_KPI');`);
+  assert.equal((await exports.getWarningData('2026-04')).savedRecordCount,3);
+  await assert.rejects(exports.deleteWarningMonth({month:'2026-13'}));
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_monthly_deposit_results').get().count,8);
+  const deleted=await exports.deleteWarningMonth({month:'2026-04'});
+  assert.equal(deleted.savedRecordCount,0);
+  assert.equal(deleted.rows.some(r=>r.saved),false);
+  assert.equal(deleted.quarterSummary.find(r=>r.employeeId==='A').recordedMonths,0);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_monthly_deposit_results').get().count,5);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM hr_warning_records').get().count,2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM hr_warning_records WHERE note='MANUAL'").get().count,1);
+  assert.equal((await exports.getWarningData('2026-03')).quarterSummary.find(r=>r.employeeId==='A').depositTotal,62);
   sqlite.close();
 });

@@ -1,5 +1,6 @@
 import {
   deleteWarningRow,
+  deleteWarningMonth,
   getWarningData,
   saveWarningConfig,
   saveWarningRows,
@@ -13,8 +14,9 @@ export async function DELETE(request: Request) {
   });
   if (!authorization.ok) return authorization.response;
   try {
+    const body = (await request.json()) as Record<string, unknown>;
     return Response.json(
-      await deleteWarningRow((await request.json()) as Record<string, unknown>),
+      body.action === "delete_month" ? await deleteWarningMonth(body) : await deleteWarningRow(body),
     );
   } catch (error) {
     return safeApiError(error, "ลบข้อมูลใบเตือนไม่สำเร็จ");

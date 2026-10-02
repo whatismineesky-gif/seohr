@@ -22,7 +22,7 @@ type QuarterRow = {
   months: Array<{ tenureMonth: number; resultMonth: string; depositCount: number | null;
     mid: number; min: number; resultType: string | null }>;
 };
-type WarningData = { month: string; configs: Config[]; rows: ResultRow[]; quarterSummary: QuarterRow[] };
+type WarningData = { month: string; configs: Config[]; rows: ResultRow[]; quarterSummary: QuarterRow[]; savedRecordCount: number };
 
 const currentMonth = new Date().toISOString().slice(0, 7);
 const number = new Intl.NumberFormat("th-TH");
@@ -62,6 +62,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ResultRow | null>(null);
+  const [deleteMonthTarget, setDeleteMonthTarget] = useState<{ month: string; count: number } | null>(null);
   const quarterGroups = useMemo(() => {
     const groups = new Map<number, QuarterRow[]>();
     for (const item of data?.quarterSummary ?? []) {
@@ -156,6 +157,19 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
     finally { setSaving(false); }
   }
 
+  async function removeMonth() {
+    if (!deleteMonthTarget || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/warnings", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "delete_month", month: deleteMonthTarget.month }) });
+      const result = await response.json() as WarningData & { error?: string };
+      if (!response.ok) throw new Error(result.error || "ลบข้อมูลทั้งเดือนไม่สำเร็จ");
+      setData(result); setConfigs(result.configs); setRows(result.rows.filter((row) => row.saved)); setDeleteMonthTarget(null);
+      toast.success(`ลบข้อมูลเดือน ${monthLabel(result.month)} ทั้งหมดแล้ว`);
+    } catch (error) { toast.error(error instanceof Error ? error.message : "ลบข้อมูลทั้งเดือนไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  }
+
   async function saveConfig() {
     setSaving(true);
     try {
@@ -182,7 +196,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
         <TabsList><TabsTrigger value="records"><FileSpreadsheet /> บันทึกประจำเดือน</TabsTrigger><TabsTrigger value="quarter"><Trophy /> รวมฝากรายไตรมาส</TabsTrigger><TabsTrigger value="config"><Settings2 /> Config</TabsTrigger></TabsList>
         <div className="flex flex-wrap items-center gap-3">
           {!canEdit && <Badge variant="outline">ดูข้อมูลอย่างเดียว</Badge>}
-          <label className="field-label min-w-48">เดือนประเมิน<Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></label>
+          <label className="field-label min-w-48">เดือนประเมิน<Input type="month" disabled={saving || Boolean(deleteMonthTarget)} value={month} onChange={(event) => setMonth(event.target.value)} /></label>
         </div>
       </div>
 
@@ -192,7 +206,7 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
           <div className="panel-heading"><div><p className="section-kicker">IMPORT MONTHLY DEPOSIT</p><h2>นำเข้าจำนวนฝากของพนักงาน</h2><p className="mt-1 text-sm text-muted-foreground">รองรับ Excel หรือ CSV โดยใช้คอลัมน์ “รหัสพนักงาน” และ “จำนวนฝาก”</p></div><label><input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={importFile} /><Button asChild><span><Upload /> Import File</span></Button></label></div>
         </section>}
         <section className="panel overflow-hidden p-0">
-          <div className="panel-heading px-6 pt-6"><div><p className="section-kicker">REVIEW BEFORE SAVE</p><h2>{canEdit ? "ตรวจสอบและแก้ไขยอดฝาก" : "ข้อมูลผลประเมินประจำเดือน"}</h2></div>{canEdit && <Button onClick={saveRows} disabled={saving || !rows.length}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกข้อมูล</Button>}</div>
+          <div className="panel-heading px-6 pt-6"><div><p className="section-kicker">REVIEW BEFORE SAVE</p><h2>{canEdit ? "ตรวจสอบและแก้ไขยอดฝาก" : "ข้อมูลผลประเมินประจำเดือน"}</h2></div>{canEdit && <div className="flex flex-wrap gap-2"><Button variant="destructive" onClick={() => setDeleteMonthTarget({ month, count: data?.savedRecordCount ?? 0 })} disabled={saving || loading || data?.month !== month || !data?.savedRecordCount}><Trash2 /> ลบข้อมูลทั้งเดือน</Button><Button onClick={saveRows} disabled={saving || loading || !rows.length}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกข้อมูล</Button></div>}</div>
           <div className="mt-4 overflow-auto border-t"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>รหัส</TableHead><TableHead>พนักงาน</TableHead><TableHead>อายุงาน</TableHead><TableHead>จำนวนฝาก</TableHead><TableHead>MID / MIN</TableHead><TableHead>ผล</TableHead><TableHead className="text-right">จัดการ</TableHead></TableRow></TableHeader><TableBody>
             {!rows.length && <TableRow><TableCell colSpan={7} className="h-32 text-center text-muted-foreground">ยังไม่มีข้อมูล กรุณา Import File</TableCell></TableRow>}
             {rows.map((item) => <TableRow key={item.employeeId}><TableCell>{item.employeeId}</TableCell><TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.team}</div></TableCell><TableCell>{item.tenureMonth} เดือน<div className="text-xs text-muted-foreground">ไตรมาส {item.tenureQuarter} · เดือนที่ {item.quarterMonth}</div></TableCell><TableCell><Input className="w-28" type="number" min="0" value={item.depositCount} disabled={!canEdit} onChange={(event) => updateDeposit(item.employeeId, Math.max(0, Number(event.target.value)))} /></TableCell><TableCell>MID {number.format(item.mid)}<div className="text-xs text-muted-foreground">MIN {number.format(item.min)}</div></TableCell><TableCell>{resultBadge(item.resultType)}</TableCell><TableCell className="text-right">{canEdit ? <><Button size="sm" variant="outline" onClick={() => saveOne(item)} disabled={saving}><Save /> บันทึก</Button><Button size="icon" variant="ghost" className="text-rose-600" aria-label="ลบ" onClick={() => setDeleteTarget(item)}><Trash2 /></Button></> : "—"}</TableCell></TableRow>)}
@@ -200,6 +214,14 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
         </section>
       </TabsContent>
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>ลบผลประเมินของพนักงาน?</AlertDialogTitle><AlertDialogDescription>ผล WINLOSS / ใบเหลือง / ใบแดงของ {deleteTarget?.nickname} ในเดือน {month} จะถูกลบออกจากข้อมูลเงินเดือนด้วย</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>ยกเลิก</AlertDialogCancel><AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={removeOne}>ลบรายการ</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+
+      <AlertDialog open={Boolean(deleteMonthTarget)} onOpenChange={(open) => !open && !saving && setDeleteMonthTarget(null)}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>ลบข้อมูลยอดฝากทั้งเดือน?</AlertDialogTitle>
+          <AlertDialogDescription>ลบยอดฝากและผล WINLOSS / ใบเหลือง / ใบแดงของเดือน {deleteMonthTarget ? monthLabel(deleteMonthTarget.month) : ""} ทั้งหมด {number.format(deleteMonthTarget?.count ?? 0)} รายการ รวมพนักงานที่ลาออกแล้ว และใบเตือนที่สร้างจากยอดฝากในเดือนนี้ ข้อมูลดังกล่าวจะหายจากสรุปรายไตรมาสและข้อมูลที่ใช้คำนวณเงินเดือน การลบนี้กู้คืนผ่านระบบไม่ได้</AlertDialogDescription>
+        </AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={saving}>ยกเลิก</AlertDialogCancel>
+          <AlertDialogAction className="bg-rose-600 hover:bg-rose-700" disabled={saving} onClick={(event) => { event.preventDefault(); void removeMonth(); }}>{saving ? <Loader2 className="animate-spin" /> : <Trash2 />} ยืนยันลบทั้งเดือน</AlertDialogAction>
+        </AlertDialogFooter></AlertDialogContent>
+      </AlertDialog>
 
       <TabsContent value="quarter" className="space-y-5">
         <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
