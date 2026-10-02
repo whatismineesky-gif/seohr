@@ -80,21 +80,52 @@ export async function getWarningData(requestedMonth: string) {
     };
   });
   const quarterRows = await database.prepare(`
-    SELECT r.employee_id, e.nickname, e.team, r.tenure_quarter,
-      SUM(r.deposit_count) AS deposit_total, SUM(r.min_value) AS min_total,
-      SUM(CASE WHEN r.result_type = 'yellow' THEN 1 ELSE 0 END) AS yellow_count,
-      SUM(CASE WHEN r.result_type = 'red' THEN 1 ELSE 0 END) AS red_count,
-      COUNT(*) AS recorded_months
+    SELECT r.employee_id, e.nickname, e.team, r.tenure_quarter, r.quarter_month,
+      r.result_month, r.tenure_month, r.deposit_count, r.mid_value, r.min_value, r.result_type
     FROM hr_monthly_deposit_results r JOIN hr_employees e ON e.id = r.employee_id
-    GROUP BY r.employee_id, r.tenure_quarter
-    ORDER BY r.tenure_quarter DESC, e.team, e.nickname
+    ORDER BY r.tenure_quarter DESC, e.team, e.nickname, r.result_month
   `).all<Record<string, unknown>>();
+  const quarters = new Map<string, {
+    employeeId: string; nickname: string; team: string; tenureQuarter: number;
+    months: Array<{ tenureMonth: number; resultMonth: string; depositCount: number | null;
+      mid: number; min: number; resultType: string | null }>;
+  }>();
+  for (const record of quarterRows.results) {
+    const employeeId = String(record.employee_id);
+    const tenureQuarter = Number(record.tenure_quarter);
+    const key = `${employeeId}:${tenureQuarter}`;
+    let quarter = quarters.get(key);
+    if (!quarter) {
+      const [year, monthNumber] = String(record.result_month).split("-").map(Number);
+      const anchor = year * 12 + monthNumber - 1 - (Number(record.quarter_month) - 1);
+      quarter = {
+        employeeId, nickname: String(record.nickname), team: String(record.team), tenureQuarter,
+        months: Array.from({ length: 3 }, (_, index) => {
+          const tenureMonth = (tenureQuarter - 1) * 3 + index + 1;
+          const config = configMap.get(configMonth(tenureMonth)) ?? { mid: 500, min: 400 };
+          const calendarMonth = anchor + index;
+          return { tenureMonth, resultMonth: `${Math.floor(calendarMonth / 12)}-${String(calendarMonth % 12 + 1).padStart(2, "0")}`,
+            depositCount: null, mid: config.mid, min: config.min, resultType: null };
+        }),
+      };
+      quarters.set(key, quarter);
+    }
+    const index = Number(record.quarter_month) - 1;
+    if (index >= 0 && index < 3) quarter.months[index] = {
+      tenureMonth: Number(record.tenure_month), resultMonth: String(record.result_month),
+      depositCount: Number(record.deposit_count), mid: Number(record.mid_value),
+      min: Number(record.min_value), resultType: String(record.result_type),
+    };
+  }
   return {
     month, configs, rows,
-    quarterSummary: quarterRows.results.map((row) => ({
-      employeeId: String(row.employee_id), nickname: String(row.nickname), team: String(row.team),
-      tenureQuarter: Number(row.tenure_quarter), depositTotal: Number(row.deposit_total), minTotal: Number(row.min_total),
-      yellowCount: Number(row.yellow_count), redCount: Number(row.red_count), recordedMonths: Number(row.recorded_months),
+    quarterSummary: [...quarters.values()].map((quarter) => ({
+      ...quarter,
+      depositTotal: quarter.months.reduce((total, item) => total + (item.depositCount ?? 0), 0),
+      minTotal: quarter.months.reduce((total, item) => total + item.min, 0),
+      yellowCount: quarter.months.filter((item) => item.resultType === "yellow").length,
+      redCount: quarter.months.filter((item) => item.resultType === "red").length,
+      recordedMonths: quarter.months.filter((item) => item.depositCount !== null).length,
     })),
   };
 }

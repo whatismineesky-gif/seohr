@@ -19,6 +19,8 @@ type ResultRow = {
 type QuarterRow = {
   employeeId: string; nickname: string; team: string; tenureQuarter: number; depositTotal: number;
   minTotal: number; yellowCount: number; redCount: number; recordedMonths: number;
+  months: Array<{ tenureMonth: number; resultMonth: string; depositCount: number | null;
+    mid: number; min: number; resultType: string | null }>;
 };
 type WarningData = { month: string; configs: Config[]; rows: ResultRow[]; quarterSummary: QuarterRow[] };
 
@@ -37,6 +39,17 @@ function resultBadge(result: string) {
   return <Badge variant="destructive"><ShieldAlert /> ใบแดง</Badge>;
 }
 
+function depositColor(result: string | null) {
+  if (result === "winloss") return "bg-emerald-50 text-emerald-700";
+  if (result === "yellow") return "bg-amber-50 text-amber-700";
+  if (result === "red") return "bg-rose-50 text-rose-700";
+  return "bg-slate-50 text-slate-500";
+}
+
+function monthLabel(month: string) {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString("th-TH", { month: "short", year: "numeric", timeZone: "Asia/Bangkok" });
+}
+
 function normalize(value: unknown) {
   return String(value ?? "").trim().replace(/\s+/g, "").toLowerCase();
 }
@@ -49,6 +62,15 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ResultRow | null>(null);
+  const quarterGroups = useMemo(() => {
+    const groups = new Map<number, QuarterRow[]>();
+    for (const item of data?.quarterSummary ?? []) {
+      const group = groups.get(item.tenureQuarter) ?? [];
+      group.push(item);
+      groups.set(item.tenureQuarter, group);
+    }
+    return [...groups.entries()].sort(([left], [right]) => right - left);
+  }, [data?.quarterSummary]);
 
   async function load() {
     setLoading(true);
@@ -180,11 +202,44 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
       <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>ลบผลประเมินของพนักงาน?</AlertDialogTitle><AlertDialogDescription>ผล WINLOSS / ใบเหลือง / ใบแดงของ {deleteTarget?.nickname} ในเดือน {month} จะถูกลบออกจากข้อมูลเงินเดือนด้วย</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>ยกเลิก</AlertDialogCancel><AlertDialogAction className="bg-rose-600 hover:bg-rose-700" onClick={removeOne}>ลบรายการ</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
 
       <TabsContent value="quarter" className="space-y-5">
-        <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">ไตรมาสนับตามอายุงาน: เดือนที่ 1–3 เป็นไตรมาส 1, เดือนที่ 4–6 เป็นไตรมาส 2 และเริ่มนับใบเหลือง/ใบแดงใหม่ทุกไตรมาส</section>
-        <section className="panel overflow-hidden p-0"><div className="panel-heading px-6 pt-6"><div><p className="section-kicker">TENURE QUARTER</p><h2>Section รวมฝากรายไตรมาส</h2></div></div><div className="mt-4 overflow-auto border-t"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead>พนักงาน</TableHead><TableHead>ไตรมาสอายุงาน</TableHead><TableHead>เดือนที่บันทึก</TableHead><TableHead>ฝากรวม</TableHead><TableHead>MIN รวม</TableHead><TableHead>ใบเหลือง / ใบแดง</TableHead><TableHead>ผลรวม</TableHead></TableRow></TableHeader><TableBody>
-          {!data?.quarterSummary.length && <TableRow><TableCell colSpan={7} className="h-32 text-center text-muted-foreground">ยังไม่มีข้อมูลรายไตรมาส</TableCell></TableRow>}
-          {data?.quarterSummary.map((item) => <TableRow key={`${item.employeeId}-${item.tenureQuarter}`}><TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.team}</div></TableCell><TableCell>ไตรมาส {item.tenureQuarter}</TableCell><TableCell>{item.recordedMonths}/3</TableCell><TableCell>{number.format(item.depositTotal)}</TableCell><TableCell>{number.format(item.minTotal)}</TableCell><TableCell>{item.yellowCount} / {item.redCount}</TableCell><TableCell>{item.depositTotal > item.minTotal ? <Badge className="bg-emerald-600">ผ่าน MIN รวม</Badge> : <Badge variant="destructive">ไม่ถึง MIN รวม</Badge>}</TableCell></TableRow>)}
-        </TableBody></Table></div></section>
+        <section className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
+          ไตรมาสนับตามอายุงาน: เดือนที่ 1–3 เป็นไตรมาส 1, เดือนที่ 4–6 เป็นไตรมาส 2 และเริ่มนับใบเหลือง/ใบแดงใหม่ทุกไตรมาส
+          <p className="mt-2">MIN รวม = MIN ทั้ง 3 เดือนของไตรมาส · สีเขียว: ผ่าน/WINLOSS · สีเหลือง: ใบเหลือง · สีแดง: ใบแดง · —: ยังไม่บันทึก</p>
+        </section>
+        {!quarterGroups.length && <section className="panel py-12 text-center text-muted-foreground">ยังไม่มีข้อมูลรายไตรมาส</section>}
+        {quarterGroups.map(([quarter, items]) => (
+          <section key={quarter} className="panel overflow-hidden p-0">
+            <div className="panel-heading px-6 pt-6">
+              <div><p className="section-kicker">TENURE QUARTER {quarter}</p><h2>ไตรมาส {quarter}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">อายุงานเดือนที่ {(quarter - 1) * 3 + 1}–{quarter * 3} · {items.length} คน</p>
+              </div>
+            </div>
+            <div className="mt-4 overflow-auto border-t"><Table>
+              <TableHeader><TableRow className="bg-slate-50">
+                <TableHead className="min-w-40">พนักงาน</TableHead>
+                {[1, 2, 3].map((slot) => <TableHead key={slot} className="min-w-36 text-center">เดือนที่ {slot}<span className="block text-xs font-normal">อายุงานเดือนที่ {(quarter - 1) * 3 + slot}</span></TableHead>)}
+                <TableHead className="text-right">ฝากรวม</TableHead><TableHead className="text-right">MIN รวม</TableHead>
+                <TableHead>ใบเหลือง / ใบแดง</TableHead><TableHead className="min-w-36">ผลรวม</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>{items.map((item) => <TableRow key={item.employeeId}>
+                <TableCell><strong>{item.nickname}</strong><div className="text-xs text-muted-foreground">{item.employeeId} · {item.team}</div></TableCell>
+                {item.months.map((detail) => <TableCell key={detail.tenureMonth} className="text-center">
+                  <div className="mb-1 text-xs text-muted-foreground">{monthLabel(detail.resultMonth)}</div>
+                  <span className={`inline-block min-w-16 rounded-md px-3 py-1 font-semibold ${depositColor(detail.resultType)}`}>
+                    {detail.depositCount === null ? "—" : number.format(detail.depositCount)}
+                  </span>
+                  <div className="mt-1 text-xs text-muted-foreground">MIN {number.format(detail.min)}</div>
+                  <div className="mt-1 text-xs">{detail.resultType === "winloss" ? "ผ่าน / WINLOSS" : detail.resultType === "yellow" ? "ใบเหลือง" : detail.resultType === "red" ? "ใบแดง" : "ยังไม่บันทึก"}</div>
+                </TableCell>)}
+                <TableCell className="text-right"><span className={`rounded-md px-3 py-1 font-semibold ${depositColor(item.recordedMonths < 3 ? null : item.depositTotal > item.minTotal ? "winloss" : "red")}`}>{number.format(item.depositTotal)}</span></TableCell>
+                <TableCell className="text-right font-medium">{number.format(item.minTotal)}</TableCell>
+                <TableCell>{item.yellowCount} / {item.redCount}</TableCell>
+                <TableCell>{item.recordedMonths < 3 ? <Badge variant="outline">บันทึก {item.recordedMonths}/3 เดือน</Badge>
+                  : item.depositTotal > item.minTotal ? <Badge className="bg-emerald-600">ผ่าน MIN รวม</Badge> : <Badge variant="destructive">ไม่ผ่าน MIN รวม</Badge>}</TableCell>
+              </TableRow>)}</TableBody>
+            </Table></div>
+          </section>
+        ))}
       </TabsContent>
 
       <TabsContent value="config" className="space-y-5">
