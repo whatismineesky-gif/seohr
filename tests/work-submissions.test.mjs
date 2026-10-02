@@ -15,7 +15,9 @@ test('submission ownership, team filters, pagination and validation use authenti
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('a@test').menu_permissions), ['dashboard','attendance','submissions']);
   assert.equal(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('b@test').menu_permissions, '[]');
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('c@test').menu_permissions), ['dashboard','submissions']);
-  const db = { prepare(sql) { let args = []; const stmt = {
+  sqlite.exec(`CREATE TABLE hr_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT,employee_id TEXT NOT NULL,source_kind TEXT,source_id INTEGER,actor_email TEXT,actor_user_id TEXT,actor_name TEXT,event_date TEXT,action TEXT,details TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(source_kind,source_id));
+    CREATE TABLE hr_notification_reads(user_email TEXT,notification_id INTEGER,read_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(user_email,notification_id));`);
+  const db = { batch(statements) { sqlite.exec('BEGIN'); try { const results=statements.map(stmt=>stmt.run());sqlite.exec('COMMIT');return results; } catch(error){sqlite.exec('ROLLBACK');throw error;} }, prepare(sql) { let args = []; const stmt = {
     bind(...values) { args = values; return stmt; },
     first() { return sqlite.prepare(sql).get(...args) ?? null; },
     all() { return { results: sqlite.prepare(sql).all(...args) }; },
@@ -23,8 +25,11 @@ test('submission ownership, team filters, pagination and validation use authenti
   }; return stmt; } };
   const code = ts.transpileModule(readFileSync(new URL('../db/work-submissions.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const api = {}; new Function('require','exports',code)(() => ({ getD1: () => db }), api);
-  const a = { email: 'A@test', employeeId: 'A', displayName: 'A' };
-  const b = { email: 'b@test', employeeId: 'B', displayName: 'B' };
+  const realCreate = api.createWorkSubmission;
+  const before = new Date('2026-10-03T02:59:59.999Z');
+  api.createWorkSubmission = (user,input) => realCreate(user,input,()=>before);
+  const a = { email: 'A@test', employeeId: 'A', displayName: 'A',userId:'a-id' };
+  const b = { email: 'b@test', employeeId: 'B', displayName: 'B',userId:'b-id' };
   const input = { keyword: ' คีย์ไทย ', website: 'example.com', date: '2026-10-03', parentWebsite: 'parent.com', type: 'new', employeeId: 'B', team: 'ทีม 2', author_email: 'b@test' };
   await api.createWorkSubmission(a, input);
   await api.createWorkSubmission(b, { ...input, type: '301', date: '2026-10-02' });
@@ -45,7 +50,7 @@ test('submission ownership, team filters, pagination and validation use authenti
   await assert.rejects(api.getWorkSubmissions(a, new URLSearchParams('page=-1')));
   result = await api.getWorkSubmissions(a, new URLSearchParams("scope=team&team=' OR 1=1 --"));
   assert.equal(result.total, 0);
-  const unlinked = { email:'hr@test',employeeId:null,displayName:'HR' };
+  const unlinked = { email:'hr@test',employeeId:null,displayName:'HR',userId:'hr-id' };
   await api.createWorkSubmission(unlinked, { ...input, type:'301_new' });
   result = await api.getWorkSubmissions(unlinked, new URLSearchParams('scope=team&team=__unassigned__'));
   assert.equal(result.total, 1); assert.equal(result.items[0].type, '301_new');
@@ -55,5 +60,46 @@ test('submission ownership, team filters, pagination and validation use authenti
   const second = await api.getWorkSubmissions(a, new URLSearchParams('page=2'));
   assert.equal(second.items.length, 1); assert.equal(second.items[0].id, 1);
   assert.equal(result.items.some(row=>row.id===second.items[0].id), false);
+
+  const receipt = await api.createWorkSubmission(a,{ items:[input,{...input,type:'301_new'}] });
+  assert.equal(receipt.count,2);
+  assert.equal(JSON.parse(sqlite.prepare("SELECT details FROM hr_notifications WHERE source_kind='work_submission' AND source_id=?").get(receipt.id).details).count,2);
+  const notices={}; const noticeCode=ts.transpileModule(readFileSync(new URL('../db/notifications.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+  new Function('require','exports',noticeCode)(()=>({getD1:()=>db}),notices);
+  let inbox=await notices.getNotifications(a); assert.equal(inbox.items[0].details.count,2);
+  assert.equal((await notices.getNotifications({...b,employeeId:'A'})).items.some(n=>n.id===inbox.items[0].id),false);
+  await notices.readNotifications(b,{action:'read',id:inbox.items[0].id});
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notification_reads').get().n,0);
+  await notices.readNotifications(a,{action:'read',id:inbox.items[0].id});
+  assert.equal((await notices.getNotifications(a)).items[0].read,true);
+  assert.equal((await notices.getNotifications(unlinked)).items.length,1);
+  await notices.readNotifications(unlinked,{action:'read_all'});
+  assert.equal((await notices.getNotifications(unlinked)).unreadCount,0);
+  const recordCount=()=>sqlite.prepare('SELECT COUNT(*) AS n FROM hr_work_submissions').get().n;
+  const beforeCount=recordCount(), beforeNotices=sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notifications').get().n;
+  await assert.rejects(api.createWorkSubmission(a,{items:[input,{...input,keyword:''}]})); assert.equal(recordCount(),beforeCount);
+  sqlite.exec(`CREATE TRIGGER reject_test_submission BEFORE INSERT ON hr_work_submissions WHEN NEW.website='fail.com' BEGIN SELECT RAISE(ABORT,'test failure');END;`);
+  await assert.rejects(api.createWorkSubmission(a,{items:[input,{...input,website:'fail.com'}]}));
+  assert.equal(recordCount(),beforeCount);assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notifications').get().n,beforeNotices);
+  sqlite.exec('DROP TRIGGER reject_test_submission');
+  for(const time of ['2026-10-03T03:00:00Z','2026-10-03T16:59:59Z']) await assert.rejects(realCreate(a,{...input,date:'2026-10-01'},()=>new Date(time)),/ปิดรับส่งงาน/);
+  assert.equal(recordCount(),beforeCount);
+  assert.equal(api.submissionWindow(before).canSubmit,true);
+  assert.equal(api.submissionWindow(new Date('2026-10-03T03:00:00Z')).canSubmit,false);
+  assert.equal(api.submissionWindow(new Date('2026-10-03T17:00:00Z')).canSubmit,true);
+  let ticks=0; await assert.rejects(realCreate(a,input,()=>ticks++ ? new Date('2026-10-03T03:00:00Z') : before),/ปิดรับส่งงาน/);
+  await assert.rejects(api.createWorkSubmission(a,{items:[]}));
+  await assert.rejects(api.createWorkSubmission(a,{items:Array(101).fill(input)}));
+  sqlite.exec(`INSERT INTO hr_employees VALUES('C','C','ทีม 10'),('D','กาย','ทีม 2');`);
+  await api.createWorkSubmission({email:'c@test',employeeId:'C',displayName:'C'}, {...input,keyword:'=HYPERLINK("x")'});
+  await api.createWorkSubmission({email:'d@test',employeeId:'D',displayName:'A'}, {...input,keyword:'comma,"quoted"'});
+  const csv=await api.exportWorkSubmissions(a,new URLSearchParams('scope=all'));
+  assert.equal(csv.charCodeAt(0),0xFEFF); assert.match(csv,/"ทีม","ชื่อ","คีย์"/);
+  assert.equal(csv.indexOf('"ทีม 2"')<csv.indexOf('"ทีม 10"'),true);
+  assert.equal(csv.indexOf('"ทีม 2","กาย"')<csv.indexOf('"ทีม 2","บี"'),true);
+  assert.ok(csv.includes('"\'=HYPERLINK(""x"")"'));
+  assert.ok(csv.includes('"comma,""quoted"""'));
+  const teamCSV=await api.exportWorkSubmissions(a,new URLSearchParams('scope=team&team=ทีม 10'));
+  assert.equal(teamCSV.includes('"ทีม 2"'),false); assert.equal(teamCSV.split('\r\n').length,2);
   sqlite.close();
 });

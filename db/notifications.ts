@@ -1,9 +1,9 @@
 import { getD1 } from './index';
 import type { SystemUser } from './attendance';
-const owned = `n.employee_id = ? AND lower(n.actor_email) <> lower(?) AND (n.actor_user_id = '' OR n.actor_user_id <> ?)`;
-function bindings(user: SystemUser) { return [user.employeeId ?? '', user.email, user.userId]; }
+const owned = `((n.source_kind = 'work_submission' AND lower(n.actor_email) = lower(?)) OR
+  (n.source_kind <> 'work_submission' AND n.employee_id <> '' AND n.employee_id = ? AND lower(n.actor_email) <> lower(?) AND (n.actor_user_id = '' OR n.actor_user_id <> ?)))`;
+function bindings(user: SystemUser) { return [user.email, user.employeeId ?? '', user.email, user.userId]; }
 export async function getNotifications(user: SystemUser, before = 0) {
-  if (!user.employeeId) return { items: [], unreadCount: 0, hasMore: false };
   const db = getD1();
   const [rows, count] = await Promise.all([
     db.prepare(`SELECT n.*, r.read_at FROM hr_notifications n LEFT JOIN hr_notification_reads r ON r.notification_id = n.id AND r.user_email = ?
@@ -19,7 +19,6 @@ export async function getNotifications(user: SystemUser, before = 0) {
     unreadCount: Number(count?.count ?? 0), hasMore: rows.results.length > 50 };
 }
 export async function readNotifications(user: SystemUser, input: Record<string, unknown>) {
-  if (!user.employeeId) return getNotifications(user);
   const all = input.action === 'read_all';
   const id = Number(input.id);
   if (!all && (input.action !== 'read' || !Number.isSafeInteger(id) || id <= 0)) throw new Error('คำสั่งแจ้งเตือนไม่ถูกต้อง');

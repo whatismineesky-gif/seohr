@@ -3,6 +3,16 @@ import type { SystemUser } from './attendance';
 
 export const submissionTypes = ['new', '301', '301_new'] as const;
 
+export function submissionWindow(now = new Date()) {
+  const date = new Date(now.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const closesAt = `${date}T10:00:00+07:00`;
+  return { date, closesAt, serverNow: now.toISOString(), canSubmit: now.getTime() < Date.parse(closesAt) };
+}
+
+function assertOpen(now: Date) {
+  if (!submissionWindow(now).canSubmit) throw new Error('ปิดรับส่งงานแล้ว กรุณาส่งงานก่อน 10:00 น. เวลาไทย');
+}
+
 function requiredText(value: unknown, label: string, max: number) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > max || /[\r\n\u0000]/.test(value)) {
     throw new Error(`กรุณาระบุ${label}ให้ถูกต้อง (ไม่เกิน ${max} ตัวอักษร)`);
@@ -15,7 +25,7 @@ async function employeeInfo(user: SystemUser) {
     .bind(user.employeeId).first<{ id: string; nickname: string; team: string }>() : null;
 }
 
-export async function createWorkSubmission(user: SystemUser, input: Record<string, unknown>) {
+function validateSubmission(input: Record<string, unknown>) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('ข้อมูลส่งงานไม่ถูกต้อง');
   const keyword = requiredText(input.keyword, 'คีย์', 250);
   const website = requiredText(input.website, 'เว็บ', 500);
@@ -26,15 +36,33 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
   }
   const type = String(input.type ?? '');
   if (!submissionTypes.some(value => value === type)) throw new Error('ประเภทการส่งงานไม่ถูกต้อง');
-  const employee = await employeeInfo(user);
-  const result = await getD1().prepare(`INSERT INTO hr_work_submissions
-    (keyword, website, work_date, parent_website, submission_type, employee_id, team, author_email, author_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(keyword, website, date, parent, type,
-      employee?.id ?? null, employee?.team ?? '', user.email.toLowerCase(), employee?.nickname || user.displayName || user.email).run();
-  return { id: result.meta.last_row_id };
+  return { keyword, website, parent, date, type };
 }
 
-export async function getWorkSubmissions(user: SystemUser, params: URLSearchParams) {
+export async function createWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
+  assertOpen(clock());
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('ข้อมูลส่งงานไม่ถูกต้อง');
+  const entries = input.items === undefined ? [input] : input.items;
+  if (!Array.isArray(entries) || entries.length < 1 || entries.length > 100) throw new Error('กรุณาส่งงานครั้งละ 1–100 รายการ');
+  const validated = entries.map(validateSubmission);
+  const employee = await employeeInfo(user);
+  const db = getD1();
+  const statements = validated.map(({ keyword, website, parent, date, type }) => db.prepare(`INSERT INTO hr_work_submissions
+    (keyword, website, work_date, parent_website, submission_type, employee_id, team, author_email, author_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(keyword, website, date, parent, type,
+      employee?.id ?? null, employee?.team ?? '', user.email.toLowerCase(), employee?.nickname || user.displayName || user.email));
+  const now = clock();
+  assertOpen(now);
+  statements.push(db.prepare(`INSERT INTO hr_notifications
+    (employee_id, source_kind, source_id, actor_email, actor_user_id, actor_name, event_date, action, details)
+    VALUES (?, 'work_submission', last_insert_rowid(), ?, ?, ?, ?, 'submitted', ?)`)
+    .bind(employee?.id ?? '', user.email.toLowerCase(), user.userId ?? '', employee?.nickname || user.displayName || user.email,
+      submissionWindow(now).date, JSON.stringify({ count: validated.length })));
+  const results = await db.batch(statements);
+  return { count: validated.length, id: results[validated.length - 1].meta.last_row_id };
+}
+
+function filters(user: SystemUser, params: URLSearchParams) {
   const scope = params.get('scope') ?? 'mine';
   if (!['mine', 'team', 'all'].includes(scope)) throw new Error('ตัวกรองไม่ถูกต้อง');
   const page = Number(params.get('page') ?? 1);
@@ -43,6 +71,11 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
   if (scope === 'team' && (!team || team.length > 250)) throw new Error('กรุณาเลือกทีม');
   const where = scope === 'mine' ? 'WHERE author_email = ? COLLATE NOCASE' : scope === 'team' ? 'WHERE team = ?' : '';
   const args = scope === 'mine' ? [user.email] : scope === 'team' ? [team === '__unassigned__' ? '' : team] : [];
+  return { where, args, page };
+}
+
+export async function getWorkSubmissions(user: SystemUser, params: URLSearchParams) {
+  const { where, args, page } = filters(user, params);
   const db = getD1();
   const [rows, count, teams, employee] = await Promise.all([
     db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type FROM hr_work_submissions ${where}
@@ -54,6 +87,25 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
   return { items: rows.results.map(row => ({ id: Number(row.id), keyword: String(row.keyword), website: String(row.website),
     date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type) })),
     total: Number(count?.total ?? 0), page, pageSize: 100,
-    teams: teams.results.map(row => ({ value: row.team || '__unassigned__', label: row.team || 'ยังไม่ระบุทีม' })),
+    window: submissionWindow(),
+    teams: teams.results.map(row => ({ value: row.team || '__unassigned__', label: row.team || 'ยังไม่ระบุทีม' }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'th', { numeric: true })),
     currentUser: { name: employee?.nickname || user.displayName || user.email, team: employee?.team ?? '' } };
+}
+
+export async function exportWorkSubmissions(user: SystemUser, params: URLSearchParams) {
+  const { where, args } = filters(user, params);
+  const rows = await getD1().prepare(`SELECT * FROM hr_work_submissions ${where}`).bind(...args).all<Record<string, unknown>>();
+  rows.results.sort((a, b) => String(a.team).localeCompare(String(b.team), 'th', { numeric: true })
+    || String(a.author_name).localeCompare(String(b.author_name), 'th', { numeric: true })
+    || String(a.work_date).localeCompare(String(b.work_date)) || Number(a.id) - Number(b.id));
+  const labels: Record<string, string> = { new: 'เว็บใหม่', '301': 'เว็บ 301', '301_new': 'เว็บ 301 ขึ้นใหม่' };
+  function cell(value: unknown) {
+    let text = String(value ?? '');
+    if (/^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return '\uFEFF' + [['ทีม', 'ชื่อ', 'คีย์', 'เว็บ', 'วันที่', 'เว็บแม่', 'ประเภท'], ...rows.results.map(row =>
+    [row.team || 'ยังไม่ระบุทีม', row.author_name, row.keyword, row.website, row.work_date, row.parent_website, labels[String(row.submission_type)]])]
+    .map(row => row.map(cell).join(',')).join('\r\n');
 }
