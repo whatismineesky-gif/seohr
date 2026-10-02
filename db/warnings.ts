@@ -80,7 +80,7 @@ export async function getWarningData(requestedMonth: string) {
     };
   });
   const quarterRows = await database.prepare(`
-    SELECT r.employee_id, e.nickname, e.team, e.start_date, r.tenure_quarter, r.quarter_month,
+    SELECT r.employee_id, e.nickname, e.team, r.tenure_quarter, r.quarter_month,
       r.result_month, r.tenure_month, r.deposit_count, r.mid_value, r.min_value, r.result_type
     FROM hr_monthly_deposit_results r JOIN hr_employees e ON e.id = r.employee_id
     ORDER BY r.tenure_quarter DESC, e.team, e.nickname, r.result_month
@@ -90,18 +90,12 @@ export async function getWarningData(requestedMonth: string) {
     months: Array<{ tenureMonth: number; resultMonth: string; depositCount: number | null;
       mid: number; min: number; resultType: string | null }>;
   }>();
-  for (const record of quarterRows.results) {
-    const employeeId = String(record.employee_id);
-    const tenureQuarter = Number(record.tenure_quarter);
-    const currentQuarter = Math.ceil(tenureAt(String(record.start_date ?? ""), month) / 3);
-    if (tenureQuarter !== currentQuarter) continue;
+  function ensureQuarter(employeeId: string, nickname: string, team: string, tenureQuarter: number, anchor: number) {
     const key = `${employeeId}:${tenureQuarter}`;
     let quarter = quarters.get(key);
     if (!quarter) {
-      const [year, monthNumber] = String(record.result_month).split("-").map(Number);
-      const anchor = year * 12 + monthNumber - 1 - (Number(record.quarter_month) - 1);
       quarter = {
-        employeeId, nickname: String(record.nickname), team: String(record.team), tenureQuarter,
+        employeeId, nickname, team, tenureQuarter,
         months: Array.from({ length: 3 }, (_, index) => {
           const tenureMonth = (tenureQuarter - 1) * 3 + index + 1;
           const config = configMap.get(configMonth(tenureMonth)) ?? { mid: 500, min: 400 };
@@ -112,6 +106,20 @@ export async function getWarningData(requestedMonth: string) {
       };
       quarters.set(key, quarter);
     }
+    return quarter;
+  }
+  // Include active employees even when their current quarter has no saved deposits.
+  const [year, monthNumber] = month.split("-").map(Number);
+  for (const employee of employees.results) {
+    const tenure = tenureAt(String(employee.start_date ?? ""), month);
+    const anchor = year * 12 + monthNumber - 1 - ((tenure - 1) % 3);
+    ensureQuarter(String(employee.id), String(employee.nickname), String(employee.team), Math.ceil(tenure / 3), anchor);
+  }
+  // Keep every recorded quarter, including historical records of resigned employees.
+  for (const record of quarterRows.results) {
+    const [recordYear, recordMonth] = String(record.result_month).split("-").map(Number);
+    const anchor = recordYear * 12 + recordMonth - 1 - (Number(record.quarter_month) - 1);
+    const quarter = ensureQuarter(String(record.employee_id), String(record.nickname), String(record.team), Number(record.tenure_quarter), anchor);
     const index = Number(record.quarter_month) - 1;
     if (index >= 0 && index < 3) quarter.months[index] = {
       tenureMonth: Number(record.tenure_month), resultMonth: String(record.result_month),
