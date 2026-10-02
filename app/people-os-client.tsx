@@ -156,7 +156,8 @@ type EmployeeSortKey =
   | "position"
   | "employment"
   | "status"
-  | "tenure";
+  | "tenure"
+  | "email";
 
 type SortDirection = "asc" | "desc";
 
@@ -610,13 +611,15 @@ function EmployeeTable({
   sortDirection,
   onSort,
   compact = false,
+  readOnly = false,
 }: {
   rows: Employee[];
-  onSelect: (employee: Employee) => void;
+  onSelect?: (employee: Employee) => void;
   sortKey: EmployeeSortKey;
   sortDirection: SortDirection;
   onSort: (key: EmployeeSortKey) => void;
   compact?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <Table>
@@ -628,15 +631,16 @@ function EmployeeTable({
           {!compact && <SortableEmployeeHead label="ตำแหน่ง" sortKey="position" activeKey={sortKey} direction={sortDirection} onSort={onSort} />}
           <SortableEmployeeHead label="ประเภท" sortKey="employment" activeKey={sortKey} direction={sortDirection} onSort={onSort} />
           <SortableEmployeeHead label={compact ? "อายุงาน" : "สถานะ"} sortKey={compact ? "tenure" : "status"} activeKey={sortKey} direction={sortDirection} onSort={onSort} />
-          <TableHead className="w-12" />
+          {compact && <SortableEmployeeHead label="Email" sortKey="email" activeKey={sortKey} direction={sortDirection} onSort={onSort} />}
+          {!readOnly && <TableHead className="w-12" />}
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((employee) => (
           <TableRow
             key={`${employee.id}-${employee.nickname}`}
-            className="cursor-pointer"
-            onClick={() => onSelect(employee)}
+            className={readOnly ? "" : "cursor-pointer"}
+            onClick={readOnly ? undefined : () => onSelect?.(employee)}
           >
             <TableCell className="font-mono text-xs text-slate-500">
               {employee.id}
@@ -661,9 +665,10 @@ function EmployeeTable({
                 <StatusBadge status={employee.status} />
               )}
             </TableCell>
-            <TableCell>
+            {compact && <TableCell className="break-all">{employee.email || "—"}</TableCell>}
+            {!readOnly && <TableCell>
               <MoreHorizontal className="size-4 text-slate-400" />
-            </TableCell>
+            </TableCell>}
           </TableRow>
         ))}
       </TableBody>
@@ -693,7 +698,7 @@ function Directory({
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<EmployeeSortKey>("team");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
-  const pageSize = 12;
+  const pageSize = mode === "members" ? 100 : 12;
 
   const baseRows = useMemo(() => {
     if (mode === "members")
@@ -708,7 +713,7 @@ function Directory({
     return baseRows.filter((employee) => {
       const matchesText =
         !normalized ||
-        [employee.id, employee.nickname, employee.team, employee.position]
+        [employee.id, employee.nickname, employee.team, employee.position, ...(mode === "members" ? [employee.email] : [])]
           .join(" ")
           .toLowerCase()
           .includes(normalized);
@@ -718,7 +723,7 @@ function Directory({
         (status === "all" || employee.status === status)
       );
     });
-  }, [baseRows, query, team, status]);
+  }, [baseRows, query, team, status, mode]);
 
   const sortedRows = useMemo(() => {
     const getValue = (employee: Employee) => {
@@ -774,6 +779,7 @@ function Directory({
       "ประเภทการจ้างงาน",
       "อายุงาน",
       "สถานะ",
+      ...(mode === "members" ? ["Email"] : []),
     ];
     const body = filtered.map((item) => [
       item.id,
@@ -783,6 +789,7 @@ function Directory({
       item.employment,
       item.tenure,
       item.status,
+      ...(mode === "members" ? [item.email] : []),
     ]);
     const csv =
       "\ufeff" +
@@ -847,7 +854,7 @@ function Directory({
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="ค้นหารหัส ชื่อเล่น ทีม หรือตำแหน่ง"
+              placeholder={mode === "members" ? "ค้นหารหัส ชื่อเล่น ทีม ตำแหน่ง หรือ Email" : "ค้นหารหัส ชื่อเล่น ทีม หรือตำแหน่ง"}
               aria-label="ค้นหาพนักงาน"
             />
           </div>
@@ -912,11 +919,12 @@ function Directory({
         <div className="border-t">
           <EmployeeTable
             rows={visibleRows}
-            onSelect={setSelected}
+            onSelect={mode === "members" ? undefined : setSelected}
             sortKey={sortKey}
             sortDirection={sortDirection}
             onSort={changeSort}
             compact={mode === "members"}
+            readOnly={mode === "members"}
           />
         </div>
 
@@ -950,7 +958,7 @@ function Directory({
         </div>
       </section>
 
-      <EmployeeEditDialog
+      {mode !== "members" && <EmployeeEditDialog
         employee={selected}
         open={Boolean(selected)}
         onOpenChange={(open) => !open && setSelected(null)}
@@ -962,7 +970,7 @@ function Directory({
           onEmployeeDeleted(employeeId);
           setSelected(null);
         }}
-      />
+      />}
     </div>
   );
 }

@@ -70,7 +70,7 @@ function parseEmployee(
   };
 }
 
-function hideSensitiveEmployeeData(employee: EmployeeRecord): EmployeeRecord {
+function hideSensitiveEmployeeData(employee: EmployeeRecord, showEmail = false): EmployeeRecord {
   return {
     ...employee,
     fullName: "",
@@ -79,7 +79,7 @@ function hideSensitiveEmployeeData(employee: EmployeeRecord): EmployeeRecord {
     bankName: "",
     accountName: "",
     aff: "",
-    email: "",
+    email: showEmail ? employee.email : "",
     discordId: "",
     dynadot: "",
     referredBy: "",
@@ -113,7 +113,7 @@ export async function GET(request: Request) {
           )
         : employees;
     return Response.json({
-      employees: visible.map(hideSensitiveEmployeeData),
+      employees: visible.map((employee) => hideSensitiveEmployeeData(employee, authorization.access.permissions.includes("members"))),
     });
   } catch (error) {
     return safeApiError(error, "โหลดข้อมูลพนักงานไม่สำเร็จ");
