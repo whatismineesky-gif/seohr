@@ -52,7 +52,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SearchableEmployeeSelect } from "@/components/searchable-employee-select";
+import { SearchableEmployeeSelect, useLoggedInEmployeeId } from "@/components/searchable-employee-select";
 
 type Employee = {
   id: string;
@@ -218,6 +218,7 @@ function statusTone(status: string) {
 }
 
 export function AdvancePanel({ employees }: { employees: Employee[] }) {
+  const linkedEmployeeId = useLoggedInEmployeeId();
   const activeEmployees = useMemo(
     () => employees.filter((item) => item.status === "ยังทำงานอยู่"),
     [employees],
@@ -311,7 +312,7 @@ export function AdvancePanel({ employees }: { employees: Employee[] }) {
         throw new Error(result.error || "บันทึกรายการไม่สำเร็จ");
       toast.success("สร้างตารางผ่อนเรียบร้อยแล้ว");
       formElement.reset();
-      setAdvanceEmployeeId("");
+      setAdvanceEmployeeId(activeEmployees.some((employee) => employee.id === linkedEmployeeId) ? linkedEmployeeId! : "");
       setRepaymentType("installment");
       await load();
     } catch (error) {

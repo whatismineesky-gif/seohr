@@ -94,6 +94,7 @@ export async function getAccessData(auth: AuthUser) {
     currentUser: {
       email: currentUser.email,
       displayName: currentUser.displayName,
+      employeeId: currentUser.employeeId,
       role: currentUser.role,
     },
     permissions,

@@ -213,6 +213,12 @@ test('HR can create and edit admin/true records with audit history, without new 
   new Function('require', 'exports', source)((name) => {
     if (name === './index') return { getD1: () => f.database };
     if (name === './employees') return { ensureEmployeesSeeded: async () => {} };
+    if (name === '../lib/employee-selection') {
+      const selection = {};
+      const code = ts.transpileModule(readFileSync(new URL('../lib/employee-selection.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+      new Function('exports', code)(selection);
+      return selection;
+    }
     throw Error(name);
   }, attendance);
   const before = await attendance.getAttendancePayrollImpact('B', '2026-10');

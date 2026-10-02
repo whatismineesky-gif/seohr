@@ -2,6 +2,8 @@
 
 import { NotificationBell } from "@/components/notification-bell";
 
+import { EmployeeSelectionProvider } from "@/components/searchable-employee-select";
+
 import {
   ChangeEvent,
   FormEvent,
@@ -2155,6 +2157,7 @@ export default function PeopleOSClient() {
     currentUser: {
       email: string;
       displayName: string;
+      employeeId: string | null;
       role: "employee" | "hr" | "audit";
     };
     permissions: View[];
@@ -2173,6 +2176,7 @@ export default function PeopleOSClient() {
         currentUser?: {
           email: string;
           displayName: string;
+          employeeId: string | null;
           role: "employee" | "hr" | "audit";
         };
         permissions?: View[];
@@ -2272,6 +2276,7 @@ export default function PeopleOSClient() {
   }
 
   return (
+    <EmployeeSelectionProvider key={access?.currentUser.email ?? "loading"} employeeId={access?.currentUser.employeeId ?? null}>
     <SidebarProvider>
       <Sidebar collapsible="icon" className="border-r-0">
         <SidebarHeader className="px-4 py-5">
@@ -2462,5 +2467,6 @@ export default function PeopleOSClient() {
       />
       <Toaster richColors position="top-right" />
     </SidebarProvider>
+    </EmployeeSelectionProvider>
   );
 }

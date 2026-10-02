@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { defaultEmployeeId } from "@/lib/employee-selection";
 import { Check, ChevronsUpDown, UserRoundSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -8,6 +9,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 
 export type EmployeeOption = { id: string; nickname: string; team: string; status?: string; email?: string };
+
+const EmployeeSelectionContext = createContext<string | null>(null);
+
+export function EmployeeSelectionProvider({ employeeId, children }: { employeeId: string | null; children: ReactNode }) {
+  return <EmployeeSelectionContext.Provider value={employeeId}>{children}</EmployeeSelectionContext.Provider>;
+}
+
+export function useLoggedInEmployeeId() {
+  return useContext(EmployeeSelectionContext);
+}
 
 export function SearchableEmployeeSelect({ employees, value, onChange, name, placeholder = "ค้นหาหรือเลือกพนักงาน", emptyLabel, disabled, className }: {
   employees: EmployeeOption[];
@@ -20,6 +31,21 @@ export function SearchableEmployeeSelect({ employees, value, onChange, name, pla
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const linkedEmployeeId = useLoggedInEmployeeId();
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (initialized.current) return;
+    if (value) { initialized.current = true; return; }
+    const initialId = defaultEmployeeId(employees, linkedEmployeeId);
+    if (!initialId) return;
+    initialized.current = true;
+    onChange(initialId);
+  }, [employees, linkedEmployeeId, value, onChange]);
+  function selectEmployee(employeeId: string) {
+    initialized.current = true;
+    onChange(employeeId);
+    setOpen(false);
+  }
   const selected = employees.find((employee) => employee.id === value);
   return <>
     {name && <input type="hidden" name={name} value={value} />}
@@ -36,8 +62,8 @@ export function SearchableEmployeeSelect({ employees, value, onChange, name, pla
           <CommandList>
             <CommandEmpty><div className="flex flex-col items-center gap-2 py-2 text-muted-foreground"><UserRoundSearch className="size-5" />ไม่พบพนักงาน</div></CommandEmpty>
             <CommandGroup>
-              {emptyLabel && <CommandItem value="ไม่เชื่อมพนักงาน none" onSelect={() => { onChange(""); setOpen(false); }}><Check className={cn("size-4", value ? "opacity-0" : "opacity-100")} /><span>{emptyLabel}</span></CommandItem>}
-              {employees.map((employee) => <CommandItem key={employee.id} value={`${employee.id} ${employee.nickname} ${employee.team} ${employee.email || ""}`} onSelect={() => { onChange(employee.id); setOpen(false); }}>
+              {emptyLabel && <CommandItem value="ไม่เชื่อมพนักงาน none" onSelect={() => selectEmployee("")}><Check className={cn("size-4", value ? "opacity-0" : "opacity-100")} /><span>{emptyLabel}</span></CommandItem>}
+              {employees.map((employee) => <CommandItem key={employee.id} value={`${employee.id} ${employee.nickname} ${employee.team} ${employee.email || ""}`} onSelect={() => selectEmployee(employee.id)}>
                 <Check className={cn("size-4", value === employee.id ? "opacity-100" : "opacity-0")} />
                 <span className="min-w-0"><strong className="block truncate">{employee.id} · {employee.nickname}</strong><span className="block truncate text-xs text-muted-foreground">{employee.team}{employee.status === "ลาออก" ? " · ลาออกในรอบเดือน" : ""}</span></span>
               </CommandItem>)}

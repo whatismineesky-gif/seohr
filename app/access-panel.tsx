@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SearchableEmployeeSelect } from "@/components/searchable-employee-select";
+import { SearchableEmployeeSelect, useLoggedInEmployeeId } from "@/components/searchable-employee-select";
 
 type Role = "employee" | "hr" | "audit";
 type UserRow = {
@@ -82,6 +82,7 @@ export function AccessPanel({
 }: {
   onAccessChanged: () => void;
 }) {
+  const linkedEmployeeId = useLoggedInEmployeeId();
   const [data, setData] = useState<AccessData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -172,7 +173,7 @@ export function AccessPanel({
         loginUsername: "",
         password: "",
         role: "employee",
-        employeeId: "",
+        employeeId: data?.employees.some((employee) => employee.id === linkedEmployeeId) ? linkedEmployeeId! : "",
         permissions: defaults.employee,
       });
       await load();
@@ -391,7 +392,8 @@ export function AccessPanel({
                   setForm({
                     ...form,
                     employeeId,
-                    email: form.email || employee?.email || "",
+                    email: form.email && form.email !== data.employees.find((item) => item.id === form.employeeId)?.email
+                      ? form.email : employee?.email || "",
                   });
                 }}
               />

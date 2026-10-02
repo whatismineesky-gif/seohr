@@ -1,3 +1,4 @@
+import { selectedEmployeeId as resolveSelectedEmployeeId } from "../lib/employee-selection";
 import { getD1 } from "./index";
 import { ensureEmployeesSeeded } from "./employees";
 
@@ -373,10 +374,7 @@ export async function getAttendanceData(
   const selectedEmployeeId =
     user.role === "employee"
       ? user.employeeId
-      : requestedEmployeeId &&
-          employees.some((item) => item.id === requestedEmployeeId)
-        ? requestedEmployeeId
-        : (employees[0]?.id ?? null);
+      : (resolveSelectedEmployeeId(employees, user.employeeId, requestedEmployeeId) || null);
 
   const auditPageSize = 50;
   const auditPage = Number.isFinite(requestedAuditPage)
