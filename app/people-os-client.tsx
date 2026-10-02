@@ -1,5 +1,7 @@
 "use client";
 
+import { DashboardMonthlyPanel } from "@/app/dashboard-monthly-panel";
+
 import { NotificationBell } from "@/components/notification-bell";
 
 import { EmployeeSelectionProvider } from "@/components/searchable-employee-select";
@@ -433,13 +435,15 @@ function Dashboard({
           tone="bg-amber-50 text-amber-700"
         />
         <SummaryCard
-          label="ยอดเงินเดือนที่มีข้อมูล"
+          label="ฐานเงินเดือนพนักงานปัจจุบัน"
           value={formatMoney.format(monthlyPayroll)}
           note={`${salaryReady}/${activeEmployees.length} คนพร้อมคำนวณ`}
           icon={Banknote}
           tone="bg-emerald-50 text-emerald-700"
         />
       </div>
+
+      <DashboardMonthlyPanel onNavigate={(menu) => onNavigate(menu as View)} />
 
       <WorkAuditOverview
         canOpenAttendance={canOpenAttendance}
