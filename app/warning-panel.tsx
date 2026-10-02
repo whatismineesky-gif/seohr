@@ -1,9 +1,10 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Loader2, Save, Settings2, ShieldAlert, Trash2, Trophy, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, Loader2, Save, Settings2, ShieldAlert, Trash2, Trophy, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -231,14 +232,17 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
         </section>
         {!quarterGroups.length && <section className="panel py-12 text-center text-muted-foreground">ยังไม่มีข้อมูลรายไตรมาส</section>}
         {quarterGroups.map(([quarter, items]) => (
-          <section key={quarter} className="panel overflow-hidden p-0">
-            <div className="panel-heading px-6 pt-6">
+          <Collapsible key={`${month}-${quarter}`} defaultOpen={false} asChild>
+          <section className="panel overflow-hidden p-0">
+            <div className="panel-heading px-6 py-5">
               <div><p className="section-kicker">TENURE QUARTER {quarter}</p><h2>ไตรมาส {quarter}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">อายุงานเดือนที่ {(quarter - 1) * 3 + 1}–{quarter * 3} · {items.length} คน</p>
               </div>
+              <CollapsibleTrigger asChild><Button variant="outline" className="group shrink-0" aria-label={`ยุบหรือขยายไตรมาส ${quarter}`}><span className="group-data-[state=open]:hidden">ขยาย</span><span className="hidden group-data-[state=open]:inline">ยุบ</span><ChevronDown className="transition-transform group-data-[state=open]:rotate-180" /></Button></CollapsibleTrigger>
             </div>
-            <div className="mt-4 overflow-auto border-t"><Table>
-              <TableHeader><TableRow className="bg-slate-50">
+            <CollapsibleContent>
+            <div className="border-t [&>[data-slot=table-container]]:max-h-[65vh] [&>[data-slot=table-container]]:overflow-auto"><Table>
+              <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50 [&_th]:shadow-[0_1px_0_0_var(--color-border)]"><TableRow className="bg-slate-50">
                 <TableHead className="min-w-40">พนักงาน</TableHead>
                 {[1, 2, 3].map((slot) => <TableHead key={slot} className="min-w-36 text-center">เดือนที่ {slot}<span className="block text-xs font-normal">อายุงานเดือนที่ {(quarter - 1) * 3 + slot}</span></TableHead>)}
                 <TableHead className="text-right">ฝากรวม</TableHead><TableHead className="text-right">MIN รวม</TableHead>
@@ -261,7 +265,9 @@ export function WarningPanel({ canEdit }: { canEdit: boolean }) {
                   : item.depositTotal > item.minTotal ? <Badge className="bg-emerald-600">ผ่าน MIN รวม</Badge> : <Badge variant="destructive">ไม่ผ่าน MIN รวม</Badge>}</TableCell>
               </TableRow>)}</TableBody>
             </Table></div>
+            </CollapsibleContent>
           </section>
+          </Collapsible>
         ))}
       </TabsContent>
 
