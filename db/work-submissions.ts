@@ -66,6 +66,22 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
   return { count: validated.length, id: results[validated.length - 1].meta.last_row_id };
 }
 
+export async function editWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
+  assertOpen(clock());
+  const fields = validateSubmission(input);
+  const id = Number(input.id);
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
+  const db = getD1();
+  const owned = await db.prepare('SELECT id FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
+    .bind(id, user.email).first<{ id: number }>();
+  if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์แก้ไขรายการนี้');
+  assertOpen(clock());
+  await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?
+    WHERE id = ? AND author_email = ? COLLATE NOCASE`)
+    .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, user.email).run();
+  return { id };
+}
+
 function filters(user: SystemUser, params: URLSearchParams) {
   const scope = params.get('scope') ?? 'mine';
   if (!['mine', 'team', 'all'].includes(scope)) throw new Error('ตัวกรองไม่ถูกต้อง');
@@ -85,14 +101,14 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
   const { where, args, page } = filters(user, params);
   const db = getD1();
   const [rows, count, teams, employee] = await Promise.all([
-    db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type FROM hr_work_submissions ${where}
+    db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type, author_email FROM hr_work_submissions ${where}
       ORDER BY work_date DESC, id DESC LIMIT 100 OFFSET ?`).bind(...args, (page - 1) * 100).all<Record<string, unknown>>(),
     db.prepare(`SELECT COUNT(*) AS total FROM hr_work_submissions ${where}`).bind(...args).first<{ total: number }>(),
     db.prepare(`SELECT team FROM hr_employees WHERE team <> '' UNION SELECT team FROM hr_work_submissions ORDER BY team`).all<{ team: string }>(),
     employeeInfo(user),
   ]);
   return { items: rows.results.map(row => ({ id: Number(row.id), keyword: String(row.keyword), website: String(row.website),
-    date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type) })),
+    date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type), canEdit: String(row.author_email).toLowerCase() === user.email.toLowerCase() })),
     total: Number(count?.total ?? 0), page, pageSize: 100,
     window: submissionWindow(),
     teams: teams.results.map(row => ({ value: row.team || '__unassigned__', label: row.team || 'ยังไม่ระบุทีม' }))

@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { ClipboardList, Download, Loader2, Plus, Save, Trash2 } from 'lucide-react';
+import { ClipboardList, Download, Loader2, Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,7 +14,7 @@ const types = [{ value: 'new', label: 'เว็บใหม่' }, { value: '30
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: today(), parentWebsite: '', type: 'new' });
 type Entry = ReturnType<typeof newEntry>;
-type Row = { id: number; keyword: string; website: string; date: string; parentWebsite: string; type: string };
+type Row = { id: number; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
 type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string }; deadlineMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
 
 function Dropdown({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: { value: string; label: string }[]; disabled?: boolean; onChange: (value: string) => void }) {
@@ -40,6 +41,7 @@ export function WorkSubmissionsPanel() {
   const [refresh, setRefresh] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [now, setNow] = useState(0);
+  const [editTarget, setEditTarget] = useState<Row | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -99,6 +101,24 @@ export function WorkSubmissionsPanel() {
     finally { setExporting(false); }
   }
 
+  async function saveEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editTarget || !canSubmit || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch('/api/work-submissions', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(editTarget) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'แก้ไขรายการส่งงานไม่สำเร็จ');
+      toast.success('แก้ไขรายการส่งงานแล้ว');
+      setEditTarget(null); setPage(1); setRefresh(current => current + 1);
+    } catch (failure) { toast.error(failure instanceof Error ? failure.message : 'แก้ไขรายการส่งงานไม่สำเร็จ'); }
+    finally { setSaving(false); }
+  }
+
+  function editField(field: 'keyword' | 'website' | 'date' | 'parentWebsite' | 'type', value: string) {
+    setEditTarget(current => current ? { ...current, [field]: value } : null);
+  }
+
   function update(rowId: string, field: keyof Entry, value: string) {
     setEntries(current => current.map(entry => entry.rowId === rowId ? { ...entry, [field]: value } : entry));
   }
@@ -146,17 +166,33 @@ export function WorkSubmissionsPanel() {
           {scope === 'team' && <div className="min-w-44"><Dropdown id="submission-team" label="ทีม" value={team} onChange={value => { setTeam(value); setPage(1); }} options={data?.teams.length ? data.teams : [{ value: team, label: team === '__unassigned__' ? 'ยังไม่ระบุทีม' : team }]} /></div>}
         </div>
         {error && <p role="alert" className="mb-4 text-sm text-rose-600">{error}</p>}
-        <Table><TableHeader><TableRow><TableHead>คีย์</TableHead><TableHead>เว็บ</TableHead><TableHead>วันที่</TableHead><TableHead>เว็บแม่</TableHead><TableHead>ประเภท</TableHead></TableRow></TableHeader>
-          <TableBody>{loading ? <TableRow><TableCell colSpan={5} className="py-10 text-center">กำลังโหลด...</TableCell></TableRow> : data?.items.length ? data.items.map(row => <TableRow key={row.id}>
+        <Table><TableHeader><TableRow><TableHead>คีย์</TableHead><TableHead>เว็บ</TableHead><TableHead>วันที่</TableHead><TableHead>เว็บแม่</TableHead><TableHead>ประเภท</TableHead><TableHead className="text-right">จัดการ</TableHead></TableRow></TableHeader>
+          <TableBody>{loading ? <TableRow><TableCell colSpan={6} className="py-10 text-center">กำลังโหลด...</TableCell></TableRow> : data?.items.length ? data.items.map(row => <TableRow key={row.id}>
             <TableCell className="max-w-72 whitespace-normal break-words">{row.keyword}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.website}</TableCell>
             <TableCell>{new Date(`${row.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.parentWebsite}</TableCell>
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
-          </TableRow>) : <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
+            <TableCell className="text-right">{row.canEdit ? <Button size="sm" variant="outline" disabled={!canSubmit || saving} title={canSubmit ? 'แก้ไขรายการของฉัน' : 'ปิดรับแก้ไขตั้งแต่ 10:00 น. เวลาไทย'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button> : '—'}</TableCell>
+          </TableRow>) : <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><span>{data?.total ?? 0} รายการ · หน้าละ 100 รายการ</span>
           <div className="flex items-center gap-3"><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage(current => current - 1)}>ก่อนหน้า</Button><span>หน้า {page} / {pages}</span><Button variant="outline" disabled={loading || page >= pages} onClick={() => setPage(current => current + 1)}>ถัดไป</Button></div>
         </div>
       </section>
     </TabsContent>
+    <Dialog open={Boolean(editTarget)} onOpenChange={open => { if (!open && !saving) setEditTarget(null); }}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>แก้ไขรายการส่งงาน</DialogTitle><DialogDescription>แก้ไขรายการของตัวเองได้ก่อน 10:00 น. เวลาไทย</DialogDescription></DialogHeader>
+        {editTarget && <form onSubmit={saveEdit} className="space-y-5">
+          <fieldset disabled={saving} className="grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2 text-sm font-medium">คีย์<Input required maxLength={250} value={editTarget.keyword} onChange={e => editField('keyword', e.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">เว็บ<Input required maxLength={500} value={editTarget.website} onChange={e => editField('website', e.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">วันที่<Input required type="date" min="1900-01-01" value={editTarget.date} onChange={e => editField('date', e.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">เว็บแม่<Input required maxLength={500} value={editTarget.parentWebsite} onChange={e => editField('parentWebsite', e.target.value)} /></label>
+            <Dropdown id="submission-edit-type" label="ประเภท" value={editTarget.type} options={types} disabled={saving} onChange={value => editField('type', value)} />
+          </fieldset>
+          {!canSubmit && <p role="alert" className="text-sm text-amber-700">ปิดรับแก้ไขแล้ว กรุณาดำเนินการก่อน 10:00 น. เวลาไทย</p>}
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={() => setEditTarget(null)}>ยกเลิก</Button><Button type="submit" disabled={saving || !canSubmit}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกการแก้ไข</Button></div>
+        </form>}
+      </DialogContent>
+    </Dialog>
   </Tabs>;
 }
