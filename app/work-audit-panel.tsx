@@ -144,6 +144,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [team, setTeam] = useState("all");
+  const [resultStatus, setResultStatus] = useState<ReviewStatus | "all">("all");
   const [configMonth, setConfigMonth] = useState(() =>
     bangkokDateValue().slice(0, 7),
   );
@@ -200,10 +201,15 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     return (data?.rows ?? []).filter(
       (row) =>
         (team === "all" || row.team === team) &&
+        (resultStatus === "all" ||
+          resultFor(
+            drafts[row.id]?.submittedCount ?? row.targetCount,
+            row.targetCount,
+          ) === resultStatus) &&
         (!keyword ||
           `${row.id} ${row.nickname} ${row.team}`.toLowerCase().includes(keyword)),
     );
-  }, [data?.rows, search, team]);
+  }, [data?.rows, drafts, search, team, resultStatus]);
 
   function setSubmitted(row: WorkAuditRow, value: number) {
     const submittedCount = Math.max(0, Math.round(Number(value) || 0));
@@ -433,11 +439,25 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
             </label>
             <select
               className="native-select w-full sm:w-44"
+              aria-label="กรองทีม"
               value={team}
               onChange={(event) => setTeam(event.target.value)}
             >
               <option value="all">ทุกทีม</option>
               {teams.map((teamName) => <option key={teamName}>{teamName}</option>)}
+            </select>
+            <select
+              className="native-select w-full sm:w-44"
+              aria-label="กรองผลตรวจ"
+              value={resultStatus}
+              onChange={(event) =>
+                setResultStatus(event.target.value as ReviewStatus | "all")
+              }
+            >
+              <option value="all">ผลตรวจทั้งหมด</option>
+              <option value="complete">ส่งครบ</option>
+              <option value="incomplete">ส่งไม่ครบ</option>
+              <option value="none">ไม่ส่งงาน</option>
             </select>
           </div>
           <div className="max-h-[62vh] overflow-auto">
@@ -530,6 +550,13 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                     </TableRow>
                   );
                 })}
+                {!filteredRows.length && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-10 text-center text-slate-500">
+                      ไม่พบพนักงานตามเงื่อนไขที่เลือก
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
