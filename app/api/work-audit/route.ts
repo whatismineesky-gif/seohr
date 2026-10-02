@@ -5,6 +5,7 @@ import {
   confirmDailyWork,
   getWorkAuditData,
   saveWorkTarget,
+  saveEmployeeWorkTarget,
 } from "@/db/work-audit";
 
 export async function GET(request: NextRequest) {
@@ -36,6 +37,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         await saveWorkTarget(authorization.access.user, body),
       );
+    if (action === "save_employee_target")
+      return NextResponse.json(await saveEmployeeWorkTarget(authorization.access.user, body));
     if (action === "confirm_day")
       return NextResponse.json(
         await confirmDailyWork(authorization.access.user, body),

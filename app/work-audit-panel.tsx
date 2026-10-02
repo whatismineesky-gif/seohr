@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchableEmployeeSelect } from "@/components/searchable-employee-select";
 import {
   Table,
   TableBody,
@@ -68,6 +69,15 @@ type WorkAuditData = {
     unreviewed: number;
   };
   dayConfirmed: boolean;
+  targetEmployees: Array<{ id: string; nickname: string; team: string }>;
+  employeeTargetConfigs: Array<{
+    employeeId: string; nickname: string; team: string; effectiveDate: string;
+    targetPerDay: number | null; updatedBy: string; updatedAt: string;
+  }>;
+  employeeTargetHistory: Array<{
+    id: number; employeeId: string; nickname: string; effectiveDate: string;
+    previousTarget: number | null; newTarget: number | null; actorName: string; createdAt: string;
+  }>;
   rows: WorkAuditRow[];
   history: Array<{
     id: number;
@@ -149,6 +159,10 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     bangkokDateValue().slice(0, 7),
   );
   const [configTarget, setConfigTarget] = useState(1);
+  const [targetEmployeeId, setTargetEmployeeId] = useState("");
+  const [effectiveDate, setEffectiveDate] = useState(() => bangkokDateValue());
+  const [employeeTarget, setEmployeeTarget] = useState(1);
+  const [useSharedTarget, setUseSharedTarget] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -297,6 +311,27 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     }
   }
 
+  async function saveEmployeeTarget() {
+    if (!targetEmployeeId) return toast.error("กรุณาเลือกพนักงาน");
+    if (!effectiveDate) return toast.error("กรุณาระบุวันที่เริ่มใช้");
+    if (!useSharedTarget && (!Number.isSafeInteger(employeeTarget) || employeeTarget < 1))
+      return toast.error("เป้าหมายเฉพาะต้องเป็นจำนวนเต็มอย่างน้อย 1 เว็บ");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/work-audit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "save_employee_target", employeeId: targetEmployeeId,
+          effectiveDate, targetPerDay: useSharedTarget ? null : employeeTarget }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "บันทึกเป้าหมายเฉพาะไม่สำเร็จ");
+      toast.success(useSharedTarget ? "ตั้งให้กลับไปใช้ค่ากลางแล้ว" : "บันทึกเป้าหมายเฉพาะแล้ว");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ");
+    } finally { setSaving(false); }
+  }
+
   if (loading && !data) {
     return (
       <div className="grid min-h-64 place-items-center rounded-2xl border bg-white">
@@ -317,7 +352,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                 Config เป้าหมายส่งงานรายวัน
               </h2>
               <p className="mt-1 text-sm text-violet-800">
-                กำหนดครั้งเดียวต่อเดือน ระบบจะใส่ค่าเริ่มต้นให้พนักงานทุกคนอัตโนมัติ
+                กำหนดค่ากลางต่อเดือน แล้วตั้งเฉพาะพนักงานที่ส่งต่างจากค่ากลาง คนที่ไม่ได้กำหนดใช้ค่ากลางอัตโนมัติ
               </p>
             </div>
           </div>
@@ -338,7 +373,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               />
             </label>
             <label className="field-label">
-              เป้าหมายขั้นต่ำต่อวัน
+              เป้าหมายกลางต่อวัน
               <Input
                 type="number"
                 min={1}
@@ -351,6 +386,68 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               บันทึก Config
             </Button>
           </div>
+        </section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="font-semibold">เป้าหมายเฉพาะพนักงาน</h3>
+          <p className="mt-1 text-sm text-slate-500">เพิ่มเฉพาะคนที่ต่างจากค่ากลาง มีผลตั้งแต่วันที่เลือกจนกว่าจะเปลี่ยนค่า ผลตรวจที่บันทึกแล้วคงเป้าหมายเดิม</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="field-label">
+              พนักงาน
+              <SearchableEmployeeSelect employees={data.targetEmployees ?? []} value={targetEmployeeId} onChange={setTargetEmployeeId} disabled={saving} />
+            </div>
+            <label className="field-label">
+              วันที่เริ่มใช้
+              <Input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} disabled={saving} />
+            </label>
+            <label className="field-label">
+              รูปแบบเป้าหมาย
+              <select className="native-select w-full" value={useSharedTarget ? "shared" : "custom"} onChange={(event) => setUseSharedTarget(event.target.value === "shared")} disabled={saving}>
+                <option value="custom">กำหนดเฉพาะคน</option>
+                <option value="shared">กลับไปใช้ค่ากลาง</option>
+              </select>
+            </label>
+            <label className="field-label">
+              เป้าหมายเฉพาะ (เว็บ/วัน)
+              <Input type="number" min={1} step={1} value={employeeTarget} onChange={(event) => setEmployeeTarget(Number(event.target.value))} disabled={saving || useSharedTarget} />
+            </label>
+          </div>
+          <Button className="mt-4" onClick={() => void saveEmployeeTarget()} disabled={saving || !targetEmployeeId}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกเป้าหมายพนักงาน
+          </Button>
+          <div className="mt-5 overflow-x-auto rounded-xl border">
+            <Table>
+              <TableHeader><TableRow><TableHead>พนักงาน</TableHead><TableHead>เริ่มใช้</TableHead><TableHead>เป้าหมาย</TableHead><TableHead>แก้ไขโดย</TableHead><TableHead>วันเวลา</TableHead><TableHead /></TableRow></TableHeader>
+              <TableBody>
+                {(data.employeeTargetConfigs ?? []).map((item) => (
+                  <TableRow key={`${item.employeeId}-${item.effectiveDate}`}>
+                    <TableCell><strong>{item.nickname}</strong><span className="block text-xs text-slate-500">{item.employeeId} · {item.team}</span></TableCell>
+                    <TableCell>{item.effectiveDate}</TableCell>
+                    <TableCell>{item.targetPerDay === null ? "ใช้ค่ากลาง" : `${item.targetPerDay} เว็บ/วัน`}</TableCell>
+                    <TableCell>{item.updatedBy}</TableCell><TableCell>{formatDateTime(item.updatedAt)}</TableCell>
+                    <TableCell><Button variant="outline" size="sm" disabled={saving} onClick={() => {
+                      setTargetEmployeeId(item.employeeId); setEffectiveDate(item.effectiveDate);
+                      setUseSharedTarget(item.targetPerDay === null); setEmployeeTarget(item.targetPerDay ?? 1);
+                    }}>แก้ไข</Button></TableCell>
+                  </TableRow>
+                ))}
+                {!data.employeeTargetConfigs?.length && <TableRow><TableCell colSpan={6} className="py-8 text-center text-slate-500">ยังไม่มีเป้าหมายเฉพาะ พนักงานทุกคนใช้ค่ากลาง</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </div>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-medium">ประวัติการเปลี่ยนเป้าหมายเฉพาะ</summary>
+            <div className="mt-3 overflow-x-auto"><Table>
+              <TableHeader><TableRow><TableHead>พนักงาน</TableHead><TableHead>เริ่มใช้</TableHead><TableHead>ค่าเดิม → ค่าใหม่</TableHead><TableHead>ผู้แก้ไข</TableHead><TableHead>วันเวลา</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {(data.employeeTargetHistory ?? []).map((item) => <TableRow key={item.id}>
+                  <TableCell>{item.employeeId} · {item.nickname}</TableCell><TableCell>{item.effectiveDate}</TableCell>
+                  <TableCell>{item.previousTarget === null ? "ค่ากลาง" : `${item.previousTarget} เว็บ`} → {item.newTarget === null ? "ค่ากลาง" : `${item.newTarget} เว็บ`}</TableCell>
+                  <TableCell>{item.actorName}</TableCell><TableCell>{formatDateTime(item.createdAt)}</TableCell>
+                </TableRow>)}
+                {!data.employeeTargetHistory?.length && <TableRow><TableCell colSpan={5} className="py-6 text-center text-slate-500">ยังไม่มีประวัติ</TableCell></TableRow>}
+              </TableBody>
+            </Table></div>
+          </details>
         </section>
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Table>

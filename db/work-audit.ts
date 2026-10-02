@@ -37,6 +37,17 @@ function defaultReason(status: ReviewStatus, target: number, submitted: number) 
   return "";
 }
 
+async function employeeTargetsFor(reviewDate: string) {
+  const result = await getD1().prepare(
+    `SELECT t.employee_id, t.target_per_day FROM hr_employee_daily_work_targets t
+     WHERE t.effective_date = (
+       SELECT MAX(latest.effective_date) FROM hr_employee_daily_work_targets latest
+       WHERE latest.employee_id = t.employee_id AND latest.effective_date <= ?
+     )`,
+  ).bind(reviewDate).all<{ employee_id: string; target_per_day: number | null }>();
+  return new Map(result.results.map((row) => [row.employee_id, row.target_per_day]));
+}
+
 async function scopedEmployees(user: SystemUser, reviewDate: string) {
   const database = getD1();
   let scopeSql = "";
@@ -138,6 +149,7 @@ export async function getWorkAuditData(
   ]);
   const targetRow = targetResult.results[0];
   const configuredTarget = Number(targetRow?.target_per_day ?? 0);
+  const employeeTargets = await employeeTargetsFor(reviewDate);
   const reviewMap = new Map(
     reviewResult.results
       .filter((row) => employeeIds.has(String(row.employee_id)))
@@ -145,7 +157,7 @@ export async function getWorkAuditData(
   );
   const rows = employees.map((employee) => {
     const review = reviewMap.get(employee.id);
-    const targetCount = Number(review?.target_count ?? configuredTarget);
+    const targetCount = Number(review?.target_count ?? employeeTargets.get(employee.id) ?? configuredTarget);
     const submittedCount = Number(review?.submitted_count ?? targetCount);
     const resultStatus = String(
       review?.result_status ?? "complete",
@@ -174,6 +186,30 @@ export async function getWorkAuditData(
     unreviewed: rows.filter((row) => !row.reviewed).length,
   };
   let history: Array<Record<string, unknown>> = [];
+  let targetEmployees: Array<{ id: string; nickname: string; team: string }> = [];
+  let employeeTargetConfigs: Array<Record<string, unknown>> = [];
+  let employeeTargetHistory: Array<Record<string, unknown>> = [];
+  if (!summaryOnly && user.role === "hr") {
+    const [employeeResult, targetConfigs, targetLogs] = await database.batch<Record<string, unknown>>([
+      database.prepare("SELECT id, nickname, team FROM hr_employees WHERE status <> 'ลาออก' ORDER BY team, nickname"),
+      database.prepare(`SELECT t.*, e.nickname, e.team FROM hr_employee_daily_work_targets t
+        JOIN hr_employees e ON e.id = t.employee_id ORDER BY t.effective_date DESC, e.team, e.nickname`),
+      database.prepare(`SELECT l.*, e.nickname FROM hr_employee_daily_work_target_logs l
+        JOIN hr_employees e ON e.id = l.employee_id ORDER BY l.id DESC LIMIT 100`),
+    ]);
+    targetEmployees = employeeResult.results.map((row) => ({ id: String(row.id), nickname: String(row.nickname), team: String(row.team) }));
+    employeeTargetConfigs = targetConfigs.results.map((row) => ({
+      employeeId: String(row.employee_id), nickname: String(row.nickname), team: String(row.team),
+      effectiveDate: String(row.effective_date), targetPerDay: row.target_per_day === null ? null : Number(row.target_per_day),
+      updatedBy: String(row.updated_by_email), updatedAt: String(row.updated_at),
+    }));
+    employeeTargetHistory = targetLogs.results.map((row) => ({
+      id: Number(row.id), employeeId: String(row.employee_id), nickname: String(row.nickname),
+      effectiveDate: String(row.effective_date), previousTarget: row.previous_target === null ? null : Number(row.previous_target),
+      newTarget: row.new_target === null ? null : Number(row.new_target),
+      actorName: String(row.actor_name || row.actor_email), createdAt: String(row.created_at),
+    }));
+  }
   if (!summaryOnly && (user.role === "hr" || user.role === "audit")) {
     const historyResult = await database
       .prepare(
@@ -234,6 +270,9 @@ export async function getWorkAuditData(
         )
       : rows,
     history,
+    targetEmployees,
+    employeeTargetConfigs,
+    employeeTargetHistory,
   };
 }
 
@@ -260,6 +299,36 @@ export async function saveWorkTarget(
   return { month, targetPerDay };
 }
 
+export async function saveEmployeeWorkTarget(user: SystemUser, input: Record<string, unknown>) {
+  if (user.role !== "hr") throw new Error("เฉพาะ HR เท่านั้นที่แก้ไขเป้าหมายส่งงานได้");
+  const employeeId = String(input.employeeId ?? "").trim();
+  const effectiveDate = validDate(input.effectiveDate);
+  const parsedDate = new Date(`${effectiveDate}T00:00:00Z`);
+  if (!Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== effectiveDate)
+    throw new Error("กรุณาระบุวันที่เริ่มใช้ให้ถูกต้อง");
+  const targetPerDay = input.targetPerDay === null ? null : Number(input.targetPerDay);
+  if (targetPerDay !== null && (!Number.isSafeInteger(targetPerDay) || targetPerDay < 1))
+    throw new Error("เป้าหมายเฉพาะต้องเป็นจำนวนเต็มอย่างน้อย 1 เว็บ");
+  const database = getD1();
+  const employee = await database.prepare("SELECT id FROM hr_employees WHERE id = ?").bind(employeeId).first();
+  if (!employee) throw new Error("ไม่พบพนักงานที่เลือก");
+  // Log the effective value before replacing this date's setting. A null target
+  // is a dated return to the shared monthly target, preserving earlier dates.
+  await database.batch([
+    database.prepare(`INSERT INTO hr_employee_daily_work_target_logs
+      (employee_id, effective_date, previous_target, new_target, actor_email, actor_name)
+      VALUES (?, ?, (SELECT target_per_day FROM hr_employee_daily_work_targets
+        WHERE employee_id = ? AND effective_date <= ? ORDER BY effective_date DESC LIMIT 1), ?, ?, ?)`)
+      .bind(employeeId, effectiveDate, employeeId, effectiveDate, targetPerDay, user.email, user.displayName),
+    database.prepare(`INSERT INTO hr_employee_daily_work_targets
+      (employee_id, effective_date, target_per_day, updated_by_email) VALUES (?, ?, ?, ?)
+      ON CONFLICT(employee_id, effective_date) DO UPDATE SET
+      target_per_day = excluded.target_per_day, updated_by_email = excluded.updated_by_email,
+      updated_at = CURRENT_TIMESTAMP`).bind(employeeId, effectiveDate, targetPerDay, user.email),
+  ]);
+  return { employeeId, effectiveDate, targetPerDay };
+}
+
 export async function confirmDailyWork(
   user: SystemUser,
   input: Record<string, unknown>,
@@ -273,6 +342,7 @@ export async function confirmDailyWork(
     .bind(reviewDate.slice(0, 7))
     .first<Record<string, unknown>>();
   const configuredTarget = Number(targetRow?.target_per_day ?? 0);
+  const employeeTargets = await employeeTargetsFor(reviewDate);
   if (configuredTarget < 1)
     throw new Error("ยังไม่ได้ตั้งค่าเป้าหมายส่งงานของเดือนนี้");
   const employees = await scopedEmployees(user, reviewDate);
@@ -303,7 +373,7 @@ export async function confirmDailyWork(
     const row = inputMap.get(employee.id);
     const targetCount = previous
       ? Number(previous.target_count)
-      : configuredTarget;
+      : employeeTargets.get(employee.id) ?? configuredTarget;
     const submittedCount = Math.max(
       0,
       Math.round(Number(row?.submittedCount ?? targetCount)),

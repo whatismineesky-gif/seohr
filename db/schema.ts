@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
@@ -197,6 +198,25 @@ export const dailyWorkTargets = sqliteTable("hr_daily_work_targets", {
   updatedByEmail: text("updated_by_email").notNull().default(""),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const employeeDailyWorkTargets = sqliteTable("hr_employee_daily_work_targets", {
+  employeeId: text("employee_id").notNull().references(() => employees.id),
+  effectiveDate: text("effective_date").notNull(),
+  targetPerDay: integer("target_per_day"),
+  updatedByEmail: text("updated_by_email").notNull().default(""),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [primaryKey({ columns: [table.employeeId, table.effectiveDate] })]);
+
+export const employeeDailyWorkTargetLogs = sqliteTable("hr_employee_daily_work_target_logs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  employeeId: text("employee_id").notNull().references(() => employees.id),
+  effectiveDate: text("effective_date").notNull(),
+  previousTarget: integer("previous_target"),
+  newTarget: integer("new_target"),
+  actorEmail: text("actor_email").notNull(),
+  actorName: text("actor_name").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const dailyWorkReviews = sqliteTable(
