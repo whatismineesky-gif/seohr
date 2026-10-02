@@ -144,6 +144,50 @@ export const attendanceRecords = sqliteTable(
   ],
 );
 
+export const checkinConfig = sqliteTable("hr_checkin_config", {
+  id: integer("id").primaryKey(),
+  otherMeetingStart: text("other_meeting_start").notNull().default("12:00"),
+  staffMeetingStart: text("staff_meeting_start").notNull().default("13:00"),
+  meetingLateAfter: text("meeting_late_after").notNull().default("13:05"),
+  meetingAnswersOpen: integer("meeting_answers_open", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  workEndStart: text("work_end_start").notNull().default("00:00"),
+  workEndDeadline: text("work_end_deadline").notNull().default("06:00"),
+  updatedByEmail: text("updated_by_email").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const employeeCheckins = sqliteTable(
+  "hr_employee_checkins",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    employeeId: text("employee_id")
+      .notNull()
+      .references(() => employees.id),
+    workDate: text("work_date").notNull(),
+    meetingStartedAt: text("meeting_started_at"),
+    meetingLate: integer("meeting_late", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    meetingEndedAt: text("meeting_ended_at"),
+    meetingAnswer: text("meeting_answer").notNull().default(""),
+    workEndedAt: text("work_ended_at"),
+    createdByUserId: text("created_by_user_id").notNull().default(""),
+    createdByEmail: text("created_by_email").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_employee_checkin_date").on(
+      table.employeeId,
+      table.workDate,
+    ),
+    index("idx_employee_checkin_work_date").on(table.workDate),
+  ],
+);
+
 export const dailyWorkTargets = sqliteTable("hr_daily_work_targets", {
   month: text("month").primaryKey(),
   targetPerDay: integer("target_per_day").notNull().default(0),

@@ -2,7 +2,7 @@ import { getD1 } from "./index";
 import { ensureEmployeesSeeded } from "./employees";
 import { ensureAttendanceSetup, type AuthUser, type SystemUser } from "./attendance";
 
-export const menuIds = ["dashboard", "employees", "members", "attendance", "resignations", "advances", "warnings", "payroll", "data", "access"] as const;
+export const menuIds = ["dashboard", "employees", "members", "checkin", "attendance", "resignations", "advances", "warnings", "payroll", "data", "access"] as const;
 export type MenuId = typeof menuIds[number];
 
 const passwordEncoder = new TextEncoder();
@@ -33,15 +33,17 @@ async function hashPassword(password: string) {
 
 const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
   hr: [...menuIds],
-  audit: ["dashboard", "employees", "members", "attendance"],
-  employee: ["dashboard", "attendance"],
+  audit: ["dashboard", "employees", "members", "checkin", "attendance"],
+  employee: ["dashboard", "checkin", "attendance"],
 };
 
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
   try {
     const parsed = JSON.parse(String(value ?? "[]"));
     if (Array.isArray(parsed) && parsed.length)
-      return menuIds.filter((id) => id === "dashboard" || parsed.includes(id));
+      return menuIds.filter(
+        (id) => id === "dashboard" || id === "checkin" || parsed.includes(id),
+      );
   } catch { /* ใช้ค่าเริ่มต้นตามบทบาท */ }
   return roleDefaults[role];
 }
@@ -110,6 +112,8 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
   const requested = Array.isArray(input.permissions) ? input.permissions.map(String) : [];
   const permissions = menuIds.filter((id) => requested.includes(id));
   if (!permissions.includes("dashboard")) permissions.unshift("dashboard");
+  if (!permissions.includes("checkin"))
+    permissions.splice(permissions.includes("dashboard") ? 1 : 0, 0, "checkin");
   if (!email || !email.includes("@")) throw new Error("กรุณาระบุอีเมลให้ถูกต้อง");
   if (!/^[A-Za-z0-9._-]{3,50}$/.test(loginUsername))
     throw new Error("Username ต้องมี 3–50 ตัว และใช้ตัวอักษรอังกฤษ ตัวเลข จุด ขีดกลาง หรือขีดล่าง");
@@ -285,7 +289,7 @@ export async function createEmployeeUsersBulk(
           userId,
           String(employee.nickname || employeeId),
           employeeId,
-          JSON.stringify(["dashboard", "attendance"]),
+          JSON.stringify(["dashboard", "checkin", "attendance"]),
           username,
         ),
     );

@@ -14,6 +14,7 @@ import {
   ArrowUpDown,
   Banknote,
   Building2,
+  CalendarCheck,
   CalendarDays,
   Clock3,
   CheckCircle2,
@@ -104,11 +105,13 @@ import { AdvancePanel, PayrollPanel } from "./payroll-panels";
 import { WarningPanel } from "./warning-panel";
 import { AccessPanel } from "./access-panel";
 import { WorkAuditOverview } from "./work-audit-panel";
+import { CheckinPanel } from "./checkin-panel";
 
 type View =
   | "dashboard"
   | "employees"
   | "members"
+  | "checkin"
   | "attendance"
   | "resignations"
   | "advances"
@@ -189,6 +192,7 @@ const navItems = [
   { id: "dashboard" as View, label: "ภาพรวม", icon: LayoutDashboard },
   { id: "employees" as View, label: "พนักงานทั้งหมด", icon: Users },
   { id: "members" as View, label: "MEMBER", icon: UserRoundCheck },
+  { id: "checkin" as View, label: "เช็คชื่อ", icon: CalendarCheck },
   { id: "attendance" as View, label: "ลงเวลางาน", icon: Clock3 },
   { id: "resignations" as View, label: "แจ้งลาออก", icon: UserMinus },
   { id: "advances" as View, label: "บันทึกรายการเบิก", icon: Banknote },
@@ -217,6 +221,12 @@ const viewTitles: Record<
     eyebrow: "ACTIVE MEMBER",
     title: "รายชื่อ MEMBER",
     description: "พนักงานที่ยังทำงานอยู่ พร้อมอายุงานและสถานะทดลองงาน",
+  },
+  checkin: {
+    eyebrow: "DAILY CHECK-IN",
+    title: "เช็คชื่อประจำวัน",
+    description:
+      "บันทึกเวลาเข้าประชุม ส่งคำตอบหลังประชุม และเวลาเลิกงานตามช่วงเวลาที่กำหนด",
   },
   attendance: {
     eyebrow: "TIME & ATTENDANCE",
@@ -2401,6 +2411,7 @@ export default function PeopleOSClient() {
           {!accessLoading && access && view === "attendance" && (
             <AttendancePanel />
           )}
+          {!accessLoading && access && view === "checkin" && <CheckinPanel />}
           {!accessLoading && access && view === "resignations" && (
             <Directory
               employees={employees}
