@@ -6,6 +6,7 @@ import {
   getWorkAuditData,
   saveWorkTarget,
   saveEmployeeWorkTarget,
+  saveWorkStatusConfig,
 } from "@/db/work-audit";
 
 export async function GET(request: NextRequest) {
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const action = String(body.action ?? "");
+    if (action === "save_status_config")
+      return NextResponse.json(await saveWorkStatusConfig(authorization.access.user, body));
     if (action === "save_config")
       return NextResponse.json(
         await saveWorkTarget(authorization.access.user, body),

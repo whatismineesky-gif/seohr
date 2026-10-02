@@ -18,7 +18,7 @@ function fixture() {
   );
   INSERT INTO hr_employees (id, sequence, nickname, team) VALUES
     ('A', 1, 'A', 'SEO 1'), ('B', 2, 'B', 'SEO 1'), ('C', 3, 'C', 'SEO 2');`);
-  for (const file of ['1014_daily_work_audit.sql', '1018_employee_daily_work_targets.sql', '1019_daily_work_review_target_logs.sql']) {
+  for (const file of ['1014_daily_work_audit.sql', '1018_employee_daily_work_targets.sql', '1019_daily_work_review_target_logs.sql', '1020_daily_work_status_filter.sql']) {
     sqlite.exec(readFileSync(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   const database = {
@@ -52,7 +52,7 @@ function fixture() {
     if (name === './attendance') return { syncAttendanceToPayroll: async (...args) => payroll.push(args) };
     throw new Error(`Unexpected import: ${name}`);
   }, exports);
-  return { ...exports, sqlite, payroll };
+  return { ...exports, sqlite, payroll, database };
 }
 const hr = { role: 'hr', userId: 'hr1', email: 'hr@example.test', displayName: 'HR' };
 
@@ -160,5 +160,74 @@ test('existing overrides show new targets and can reconfirm without changing act
   await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows: preview.rows.map(row => ({ employeeId: row.id, submittedCount: row.submittedCount, reason: row.reason })) });
   assert.equal((await f.getWorkAuditData(hr, '2026-10-02')).rows[1].targetPending, false);
   assert.equal((await f.getWorkAuditData(hr, '2026-10-02', true)).rows.length, 0);
+  f.sqlite.close();
+});
+
+test('status config filters by manual attendance on review date, supports all options and preserves role scope', async () => {
+  const f = fixture();
+  f.sqlite.exec(`INSERT INTO hr_employees (id, sequence, nickname, team) VALUES
+    ('D', 4, 'D', 'SEO 2'), ('E', 5, 'E', 'SEO 2'), ('F', 6, 'F', 'SEO 1');
+    INSERT INTO hr_attendance_records (employee_id, record_date, record_type, source_type) VALUES
+    ('B', '2026-10-02', 'absence', 'manual'),
+    ('C', '2026-10-02', 'meeting_leave', 'manual'),
+    ('D', '2026-10-02', 'admin', 'manual'),
+    ('E', '2026-10-02', 'true', 'manual'),
+    ('F', '2026-10-02', 'late', 'manual'),
+    ('A', '2026-10-02', 'absence', 'work_audit');`);
+  const ids = async () => (await f.getWorkAuditData(hr, '2026-10-02')).rows.map(row => row.id).sort();
+  assert.deepEqual(await ids(), ['A', 'C', 'F']);
+  for (const [status, expected] of [ ['working', ['A', 'F']], ['absence', ['B']], ['meeting_leave', ['C']], ['admin', ['D']], ['true', ['E']] ]) {
+    await f.saveWorkStatusConfig(hr, { includedStatuses: [status] });
+    assert.deepEqual(await ids(), expected);
+  }
+  await f.saveWorkStatusConfig(hr, { includedStatuses: ['admin', 'true', 'admin'] });
+  assert.deepEqual(await ids(), ['D', 'E']);
+  assert.deepEqual((await f.getWorkAuditData(hr, '2026-10-03')).rows, []);
+  const employee = await f.getWorkAuditData({ ...hr, role: 'employee', employeeId: 'D' }, '2026-10-02');
+  assert.deepEqual(employee.rows.map(row => row.id), ['D']);
+  await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 3 });
+  await f.confirmDailyWork(hr, { reviewDate: '2026-10-02', rows: [] });
+  assert.deepEqual(f.sqlite.prepare('SELECT employee_id FROM hr_daily_work_reviews ORDER BY employee_id').all().map(row => row.employee_id), ['D', 'E']);
+  await f.saveWorkStatusConfig(hr, { includedStatuses: [] });
+  assert.deepEqual(await ids(), []);
+  for (const role of ['audit', 'employee']) await assert.rejects(f.saveWorkStatusConfig({ ...hr, role }, { includedStatuses: ['working'] }), /เฉพาะ HR/);
+  for (const includedStatuses of [null, 'admin', ['not_a_status']]) await assert.rejects(f.saveWorkStatusConfig(hr, { includedStatuses }), /ไม่ถูกต้อง/);
+  f.sqlite.close();
+});
+
+test('HR can create and edit admin/true records with audit history, without new payroll deductions', async () => {
+  const f = fixture();
+  f.sqlite.exec(`CREATE TABLE hr_payroll_records (
+    id INTEGER, employee_id TEXT, payroll_month TEXT, base_salary INTEGER,
+    other_income INTEGER, winloss_amount INTEGER, installment_deduction INTEGER,
+    warning_deduction INTEGER, other_deduction INTEGER
+  );
+  CREATE TABLE hr_attendance_rules (id INTEGER, code TEXT, name TEXT, event_type TEXT,
+    trigger_from INTEGER, action_type TEXT, action_value INTEGER, period TEXT, active INTEGER, built_in INTEGER);
+  CREATE TABLE hr_attendance_bonus_tiers (id INTEGER, min_month INTEGER, max_month INTEGER, amount INTEGER, active INTEGER);`);
+  f.sqlite.exec(readFileSync(new URL('../migrations/1008_colorful_grim_reaper.sql', import.meta.url), 'utf8'));
+  const source = ts.transpileModule(readFileSync(new URL('../db/attendance.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const attendance = {};
+  new Function('require', 'exports', source)((name) => {
+    if (name === './index') return { getD1: () => f.database };
+    if (name === './employees') return { ensureEmployeesSeeded: async () => {} };
+    throw Error(name);
+  }, attendance);
+  const before = await attendance.getAttendancePayrollImpact('B', '2026-10');
+  const input = { employeeId: 'B', recordDate: '2026-10-02', recordType: 'admin', reason: 'งานแอดมิน' };
+  const created = await attendance.createAttendanceRecord(hr, input);
+  assert.equal(f.sqlite.prepare('SELECT record_type FROM hr_attendance_records WHERE id = ?').get(created.id).record_type, 'admin');
+  await attendance.updateAttendanceRecord(hr, { ...input, id: created.id, recordType: 'true', reason: 'งานทรู' });
+  assert.equal(f.sqlite.prepare('SELECT record_type FROM hr_attendance_records WHERE id = ?').get(created.id).record_type, 'true');
+  const log = f.sqlite.prepare('SELECT * FROM hr_attendance_audit_logs').get();
+  assert.equal(log.previous_record_type, 'admin');
+  assert.equal(log.new_record_type, 'true');
+  assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
+  for (const recordType of ['admin', 'true']) {
+    await assert.rejects(attendance.createAttendanceRecord({ ...hr, role: 'employee', employeeId: 'B' }, { ...input, recordType }), /พนักงานบันทึกได้เฉพาะ/);
+    await assert.rejects(attendance.createAttendanceRecord({ ...hr, role: 'audit' }, { ...input, recordType }), /Audit/);
+  }
   f.sqlite.close();
 });

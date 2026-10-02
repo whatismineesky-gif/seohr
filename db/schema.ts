@@ -200,6 +200,13 @@ export const dailyWorkTargets = sqliteTable("hr_daily_work_targets", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const dailyWorkStatusConfig = sqliteTable("hr_daily_work_status_config", {
+  id: integer("id").primaryKey(),
+  includedStatuses: text("included_statuses").notNull(),
+  updatedByEmail: text("updated_by_email").notNull().default(""),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const employeeDailyWorkTargets = sqliteTable("hr_employee_daily_work_targets", {
   employeeId: text("employee_id").notNull().references(() => employees.id),
   effectiveDate: text("effective_date").notNull(),

@@ -28,6 +28,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ReviewStatus = "complete" | "incomplete" | "none";
+const attendanceStatusOptions = [
+  { value: "working", label: "ทำงาน" },
+  { value: "absence", label: "หยุด" },
+  { value: "meeting_leave", label: "ลา" },
+  { value: "admin", label: "แอดมิน" },
+  { value: "true", label: "ทรู" },
+] as const;
 
 type WorkAuditRow = {
   id: string;
@@ -48,6 +55,7 @@ type WorkAuditRow = {
 
 type WorkAuditData = {
   reviewDate: string;
+  statusConfig: { includedStatuses: string[]; updatedBy: string; updatedAt: string };
   canReview: boolean;
   canConfigure: boolean;
   config: null | {
@@ -166,6 +174,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
   const [effectiveDate, setEffectiveDate] = useState(() => bangkokDateValue());
   const [employeeTarget, setEmployeeTarget] = useState(1);
   const [useSharedTarget, setUseSharedTarget] = useState(false);
+  const [includedStatuses, setIncludedStatuses] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -176,6 +185,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
       const result = (await response.json()) as WorkAuditData & { error?: string };
       if (!response.ok) throw new Error(result.error || "โหลดข้อมูลไม่สำเร็จ");
       setData(result);
+      setIncludedStatuses(result.statusConfig.includedStatuses);
       setDrafts(
         Object.fromEntries(
           result.rows.map((row) => [
@@ -346,6 +356,22 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
     } finally { setSaving(false); }
   }
 
+  async function saveStatusConfig() {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/work-audit", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "save_status_config", includedStatuses }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "บันทึกสถานะไม่สำเร็จ");
+      toast.success("บันทึกสถานะที่นำมาตรวจงานแล้ว");
+      window.dispatchEvent(new Event("work-audit-targets-updated"));
+      await loadData();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  }
+
   if (loading && !data) {
     return (
       <div className="grid min-h-64 place-items-center rounded-2xl border bg-white">
@@ -370,6 +396,25 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               </p>
             </div>
           </div>
+        </section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="font-semibold">สถานะลงเวลาที่แสดงในรายการตรวจส่งงานรายวัน</h3>
+          <p className="mt-1 text-sm text-slate-500">เลือกได้หลายสถานะ ใช้สถานะของวันที่ตรวจ ถ้าไม่เลือกเลยรายการตรวจงานจะว่าง</p>
+          <div className="my-4 flex flex-wrap gap-4">
+            {attendanceStatusOptions.map((option) => (
+              <label key={option.value} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={includedStatuses.includes(option.value)} disabled={saving}
+                  onChange={(event) => setIncludedStatuses((current) => event.target.checked
+                    ? [...current, option.value] : current.filter((status) => status !== option.value))} />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <p className="mb-4 text-xs text-slate-500">ทำงาน: ไม่มีรายการหยุด / ลา / แอดมิน / ทรู หรือมีเฉพาะมาสาย · ลา: ลาประชุม · หากมีหลายสถานะ จะแสดงเมื่อมีสถานะใดสถานะหนึ่งตรงกับที่เลือก</p>
+          <Button onClick={() => void saveStatusConfig()} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกสถานะที่แสดง
+          </Button>
+          {data.statusConfig.updatedBy && <p className="mt-3 text-xs text-slate-500">แก้ไขโดย {data.statusConfig.updatedBy} · {formatDateTime(data.statusConfig.updatedAt)}</p>}
         </section>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-[220px_220px_auto] sm:items-end">
@@ -510,6 +555,9 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               <h2 className="mt-1 text-xl font-semibold">ตรวจการส่งงานรายวัน</h2>
               <p className="mt-1 text-sm text-slate-500">
                 ระบบตั้งค่าเริ่มต้นเป็นส่งครบ แก้ไขเฉพาะพนักงานที่ส่งไม่ครบหรือไม่ส่งงาน
+              </p>
+              <p className="mt-2 text-xs text-indigo-700">
+                สถานะที่นำมาตรวจ: {attendanceStatusOptions.filter((option) => data.statusConfig.includedStatuses.includes(option.value)).map((option) => option.label).join(" / ") || "ไม่ได้เลือกสถานะ"}
               </p>
             </div>
             <label className="field-label w-full sm:w-52">

@@ -2,6 +2,27 @@ import { syncAttendanceToPayroll, type SystemUser } from "./attendance";
 import { getD1 } from "./index";
 
 type ReviewStatus = "complete" | "incomplete" | "none";
+const workStatuses = ["working", "absence", "meeting_leave", "admin", "true"] as const;
+
+async function workStatusConfig() {
+  const row = await getD1().prepare("SELECT included_statuses, updated_by_email, updated_at FROM hr_daily_work_status_config WHERE id = 1")
+    .first<{ included_statuses: string; updated_by_email: string; updated_at: string }>();
+  const statuses = row ? JSON.parse(row.included_statuses) as string[] : ["working", "meeting_leave"];
+  return { includedStatuses: statuses.filter((status) => (workStatuses as readonly string[]).includes(status)),
+    updatedBy: row?.updated_by_email ?? "", updatedAt: row?.updated_at ?? "" };
+}
+
+export async function saveWorkStatusConfig(user: SystemUser, input: Record<string, unknown>) {
+  if (user.role !== "hr") throw new Error("เฉพาะ HR เท่านั้นที่ตั้งค่าสถานะตรวจงานได้");
+  if (!Array.isArray(input.includedStatuses) || input.includedStatuses.some((status) => typeof status !== "string" || !(workStatuses as readonly string[]).includes(status)))
+    throw new Error("สถานะที่เลือกไม่ถูกต้อง");
+  const statuses = [...new Set(input.includedStatuses as string[])];
+  await getD1().prepare(`INSERT INTO hr_daily_work_status_config (id, included_statuses, updated_by_email) VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET included_statuses = excluded.included_statuses,
+    updated_by_email = excluded.updated_by_email, updated_at = CURRENT_TIMESTAMP`)
+    .bind(JSON.stringify(statuses), user.email).run();
+  return { includedStatuses: statuses };
+}
 
 async function runBatches(statements: D1PreparedStatement[]) {
   const database = getD1();
@@ -50,8 +71,10 @@ async function employeeTargetsFor(reviewDate: string) {
 
 async function scopedEmployees(user: SystemUser, reviewDate: string) {
   const database = getD1();
+  const { includedStatuses } = await workStatusConfig();
+  const recordStatuses = includedStatuses.filter((status) => status !== "working");
   let scopeSql = "";
-  const bindings: unknown[] = [reviewDate, reviewDate, reviewDate];
+  const bindings: unknown[] = [reviewDate, reviewDate, includedStatuses.includes("working") ? 1 : 0, reviewDate, reviewDate, ...recordStatuses];
   if (user.role === "employee") {
     const viewer = user.employeeId
       ? await database
@@ -86,13 +109,18 @@ async function scopedEmployees(user: SystemUser, reviewDate: string) {
            ELSE end_date END >= ?)
        AND LOWER(REPLACE(REPLACE(TRIM(position), '-', ''), ' ', '')) NOT IN ('parttime', 'freelancer')
        AND LOWER(REPLACE(REPLACE(TRIM(employment), '-', ''), ' ', '')) NOT IN ('parttime', 'freelancer')
-       AND NOT EXISTS (
+       AND ((? = 1 AND NOT EXISTS (
          SELECT 1 FROM hr_attendance_records attendance
          WHERE attendance.employee_id = e.id
            AND attendance.record_date = ?
-           AND attendance.record_type = 'absence'
+           AND attendance.record_type IN ('absence', 'meeting_leave', 'admin', 'true')
            AND attendance.source_type <> 'work_audit'
-       )
+       )) OR EXISTS (
+         SELECT 1 FROM hr_attendance_records attendance
+         WHERE attendance.employee_id = e.id AND attendance.record_date = ?
+           AND attendance.source_type <> 'work_audit'
+           AND attendance.record_type IN (${recordStatuses.map(() => "?").join(", ") || "NULL"})
+       ))
        ${scopeSql}
        ORDER BY sequence, id`,
     )
@@ -283,6 +311,7 @@ export async function getWorkAuditData(
     targetEmployees,
     employeeTargetConfigs,
     employeeTargetHistory,
+    statusConfig: await workStatusConfig(),
   };
 }
 

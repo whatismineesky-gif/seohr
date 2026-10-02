@@ -405,16 +405,16 @@ export async function getAttendanceData(
   const statusSql = canViewTeamSummary
     ? `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
        FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
-       WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+       WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave', 'admin', 'true')
          AND e.team = ? ORDER BY e.sequence, r.id`
     : user.role === "employee"
       ? `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
          FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
-         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave', 'admin', 'true')
            AND r.employee_id = ? ORDER BY r.id`
       : `SELECT r.employee_id, r.record_type, r.reason, e.nickname, e.team, e.position
          FROM hr_attendance_records r JOIN hr_employees e ON e.id = r.employee_id
-         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave')
+         WHERE r.record_date = ? AND r.record_type IN ('absence', 'meeting_leave', 'admin', 'true')
          ORDER BY e.sequence, r.id`;
   const statusStatement = canViewTeamSummary
     ? database.prepare(statusSql).bind(statusDate, viewerTeam)
@@ -647,8 +647,8 @@ export async function createAttendanceRecord(
   } else if (user.role === "audit") {
     if (recordType !== "absence")
       throw new Error("Audit บันทึกได้เฉพาะหยุดงาน");
-  } else if (!new Set(["late", "absence", "meeting_leave"]).has(recordType)) {
-    throw new Error("HR บันทึกได้เฉพาะมาสาย หยุดงาน หรือลาประชุม");
+  } else if (!new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)) {
+    throw new Error("HR บันทึกได้เฉพาะมาสาย หยุดงาน ลาประชุม แอดมิน หรือทรู");
   }
 
   if (!employeeId) throw new Error("กรุณาเลือกพนักงาน");
@@ -724,7 +724,7 @@ export async function updateAttendanceRecord(
     throw new Error("Audit บันทึกได้เฉพาะหยุดงาน");
   if (
     user.role === "hr" &&
-    !new Set(["late", "absence", "meeting_leave"]).has(recordType)
+    !new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)
   )
     throw new Error("ประเภทการลงเวลาไม่ถูกต้อง");
   const database = getD1();

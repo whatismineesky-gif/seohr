@@ -76,7 +76,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { WorkAuditPanel } from "./work-audit-panel";
 
 type Role = "employee" | "hr" | "audit";
-type EventType = "absence" | "meeting_leave" | "late";
+type EventType = "absence" | "meeting_leave" | "late" | "admin" | "true";
 type ActionType = "lose_bonus" | "deduct_money" | "force_leave" | "limit";
 
 type AttendanceData = {
@@ -95,7 +95,7 @@ type AttendanceData = {
     nickname: string;
     team: string;
     position: string;
-    recordType: "absence" | "meeting_leave";
+    recordType: EventType;
     reason: string;
   }>;
   selectedEmployeeId: string | null;
@@ -188,6 +188,8 @@ const eventLabels: Record<EventType, string> = {
   absence: "หยุดงาน",
   meeting_leave: "ลาประชุม",
   late: "มาสาย",
+  admin: "แอดมิน",
+  true: "ทรู",
 };
 
 const actionLabels: Record<ActionType, string> = {
@@ -363,7 +365,7 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
               setDraft({ ...draft, eventType: event.target.value as EventType })
             }
           >
-            {Object.entries(eventLabels).map(([value, label]) => (
+            {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true").map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -578,7 +580,7 @@ export function AttendancePanel() {
     if (data?.currentUser.role === "employee")
       return ["absence", "meeting_leave"];
     if (data?.currentUser.role === "audit") return ["absence"];
-    return ["late", "absence", "meeting_leave"];
+    return ["late", "absence", "meeting_leave", "admin", "true"];
   }, [data?.currentUser.role]);
 
   const effectiveRecordType = allowedTypes.includes(recordType)
@@ -1255,7 +1257,7 @@ export function AttendancePanel() {
                 DAILY ATTENDANCE STATUS
               </p>
               <h2 className="mt-1 text-xl font-semibold text-slate-950">
-                ผู้หยุดงานและลาประชุม
+                สถานะการลงเวลาประจำวัน
               </h2>
               <p className="mt-1 text-sm text-slate-500">
                 {statusDateLabel}
@@ -1282,6 +1284,8 @@ export function AttendancePanel() {
             <Badge className="bg-amber-500 text-amber-950">
               ลาประชุม {statusMeetingLeaveCount} คน
             </Badge>
+            <Badge className="bg-blue-600">แอดมิน {data.statusRecords.filter((record) => record.recordType === "admin").length} คน</Badge>
+            <Badge className="bg-cyan-600">ทรู {data.statusRecords.filter((record) => record.recordType === "true").length} คน</Badge>
           </div>
           {data.statusRecords.length ? (
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1302,8 +1306,8 @@ export function AttendancePanel() {
                     {record.recordType === "absence" ? (
                       <Badge variant="destructive">หยุดงาน</Badge>
                     ) : (
-                      <Badge className="bg-amber-500 text-amber-950">
-                        ลาประชุม
+                      <Badge className={record.recordType === "meeting_leave" ? "bg-amber-500 text-amber-950" : "bg-blue-600"}>
+                        {eventLabels[record.recordType]}
                       </Badge>
                     )}
                   </div>
@@ -1315,7 +1319,7 @@ export function AttendancePanel() {
             </div>
           ) : (
             <div className="mt-4 rounded-xl border border-dashed border-emerald-200 bg-emerald-50 px-4 py-6 text-center text-sm text-emerald-700">
-              วันที่เลือกยังไม่มีผู้หยุดงานหรือลาประชุม
+              วันที่เลือกยังไม่มีรายการหยุด / ลา / แอดมิน / ทรู
             </div>
           )}
         </section>
@@ -1342,13 +1346,15 @@ export function AttendancePanel() {
             <Badge variant="destructive">หยุด</Badge>
             <Badge className="bg-amber-500 text-amber-950">ลา</Badge>
             <Badge className="bg-violet-600">สาย</Badge>
+            <Badge className="bg-blue-600">แอดมิน</Badge>
+            <Badge className="bg-cyan-600">ทรู</Badge>
           </div>
         </section>
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-5 py-4">
             <h3 className="font-semibold">ตารางประจำเดือน {month}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              ทุกวันของเดือนเป็นวันทำงาน หากไม่มีรายการหยุด / ลา / สาย จะแสดง
+              ทุกวันของเดือนเป็นวันทำงาน หากไม่มีรายการหยุด / ลา / สาย / แอดมิน / ทรู จะแสดง
               “ทำงาน”
             </p>
           </div>
@@ -1408,7 +1414,7 @@ export function AttendancePanel() {
                           ? "หยุด"
                           : record.recordType === "meeting_leave"
                             ? "ลา"
-                            : "สาย",
+                            : record.recordType === "late" ? "สาย" : eventLabels[record.recordType],
                       );
                       return (
                         <td
@@ -1485,7 +1491,7 @@ export function AttendancePanel() {
                     })
                   }
                 >
-                  {Object.entries(eventLabels).map(([value, label]) => (
+                  {Object.entries(eventLabels).filter(([value]) => allowedTypes.includes(value as EventType)).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>
@@ -1620,7 +1626,7 @@ export function AttendancePanel() {
                     })
                   }
                 >
-                  {Object.entries(eventLabels).map(([value, label]) => (
+                  {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true").map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>
