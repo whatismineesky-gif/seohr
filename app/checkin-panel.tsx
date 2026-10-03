@@ -51,6 +51,7 @@ type CheckinSession = {
 };
 
 type CheckinData = {
+  resetSummary: { removed_checkins: number; removed_attendance: number; remaining_checkins: number; remaining_attendance: number } | null;
   currentUser: {
     displayName: string;
     role: "employee" | "hr" | "audit";
@@ -267,6 +268,11 @@ export function CheckinPanel() {
       </TabsContent>
 
       {isHr && <TabsContent value="config" className="space-y-5">
+        {data.resetSummary && <section className="panel">
+          <h2>ผลล้างข้อมูลทดสอบเช็คชื่อ 3 ต.ค. 2569</h2>
+          <p className="mt-2 text-sm">ล้างรายการเช็คชื่อ {data.resetSummary.removed_checkins} รายการ และรายการลงเวลาที่สร้างจากการเช็คชื่อ {data.resetSummary.removed_attendance} รายการ</p>
+          <p className="mt-2 text-sm">รายการวันที่ 3 ต.ค. ที่ยังอยู่ในระบบขณะนี้: เช็คชื่อ {data.resetSummary.remaining_checkins} รายการ · ลงเวลาจากเช็คชื่อ {data.resetSummary.remaining_attendance} รายการ</p>
+        </section>}
         <section className="panel">
           <div className="panel-heading"><div><p className="section-kicker">CHECK-IN CONFIG</p><h2>ตั้งค่าเวลาเช็คชื่อ</h2><p className="mt-1 text-sm text-muted-foreground">เวลาในระบบทั้งหมดอ้างอิงเขตเวลา Asia/Bangkok</p></div><Settings2 className="text-indigo-600" /></div>
           <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">

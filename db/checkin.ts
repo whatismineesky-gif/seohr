@@ -176,7 +176,16 @@ export async function getCheckinData(user: SystemUser) {
     now.minutes >= timeToMinutes(config.workEndStart) &&
     now.minutes <= timeToMinutes(config.workEndDeadline);
 
+  const resetSummary = user.role === "hr" ? await getD1().prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM hr_checkin_test_archive_20261003) AS removed_checkins,
+      (SELECT COUNT(*) FROM hr_checkin_attendance_archive_20261003) AS removed_attendance,
+      (SELECT COUNT(*) FROM hr_employee_checkins WHERE work_date = '2026-10-03') AS remaining_checkins,
+      (SELECT COUNT(*) FROM hr_attendance_records WHERE source_type = 'checkin' AND record_date = '2026-10-03') AS remaining_attendance
+  `).first<Record<string, number>>() : null;
+
   return {
+    resetSummary,
     currentUser: {
       displayName: user.displayName,
       role: user.role,
