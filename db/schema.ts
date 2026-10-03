@@ -56,7 +56,10 @@ export const workSubmissions = sqliteTable("hr_work_submissions", {
   authorEmail: text("author_email").notNull(),
   authorName: text("author_name").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(""),
 }, table => [
+  index("idx_work_submissions_created").on(table.createdAt, table.id),
+  index("idx_work_submissions_team_created").on(table.team, table.createdAt, table.id),
   index("idx_work_submissions_date").on(table.workDate, table.id),
   index("idx_work_submissions_author").on(table.authorEmail, table.workDate, table.id),
   index("idx_work_submissions_team").on(table.team, table.workDate, table.id),
@@ -518,3 +521,20 @@ export const notificationReads = sqliteTable('hr_notification_reads', {
   userEmail: text('user_email').notNull(), notificationId: integer('notification_id').notNull().references(() => personalNotifications.id, { onDelete: 'cascade' }),
   readAt: text('read_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, table => [uniqueIndex('hr_notification_reads_user_notice').on(table.userEmail, table.notificationId)]);
+
+export const integrationApiKeys = sqliteTable("hr_integration_api_keys", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  tokenPrefix: text("token_prefix").notNull(),
+  scope: text("scope").notNull(),
+  team: text("team").notNull().default(""),
+  expiresAt: text("expires_at"),
+  createdByEmail: text("created_by_email").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  revokedAt: text("revoked_at"),
+  revokedByEmail: text("revoked_by_email"),
+  lastUsedAt: text("last_used_at"),
+  requestMinute: integer("request_minute").notNull().default(0),
+  requestCount: integer("request_count").notNull().default(0),
+});

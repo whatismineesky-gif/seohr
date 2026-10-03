@@ -52,8 +52,8 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
   const employee = await employeeInfo(user);
   const db = getD1();
   const statements = validated.map(({ keyword, website, parent, date, type }) => db.prepare(`INSERT INTO hr_work_submissions
-    (keyword, website, work_date, parent_website, submission_type, employee_id, team, author_email, author_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(keyword, website, date, parent, type,
+    (keyword, website, work_date, parent_website, submission_type, employee_id, team, author_email, author_name, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).bind(keyword, website, date, parent, type,
       employee?.id ?? null, employee?.team ?? '', user.email.toLowerCase(), employee?.nickname || user.displayName || user.email));
   const now = clock();
   assertOpen(now);
@@ -76,7 +76,7 @@ export async function editWorkSubmission(user: SystemUser, input: Record<string,
     .bind(id, user.email).first<{ id: number }>();
   if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์แก้ไขรายการนี้');
   assertOpen(clock());
-  await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?
+  await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND author_email = ? COLLATE NOCASE`)
     .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, user.email).run();
   return { id };
@@ -113,7 +113,7 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
     window: submissionWindow(),
     teams: teams.results.map(row => ({ value: row.team || '__unassigned__', label: row.team || 'ยังไม่ระบุทีม' }))
       .sort((a, b) => a.label.localeCompare(b.label, 'th', { numeric: true })),
-    currentUser: { name: employee?.nickname || user.displayName || user.email, team: employee?.team ?? '' } };
+    currentUser: { role: user.role, name: employee?.nickname || user.displayName || user.email, team: employee?.team ?? '' } };
 }
 
 export async function workSubmissionReport(user: SystemUser, params: URLSearchParams) {

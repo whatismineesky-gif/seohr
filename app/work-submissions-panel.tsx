@@ -1,7 +1,9 @@
 "use client";
 
+import { WorkSubmissionApiPanel } from "./work-submission-api-panel";
+
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { ClipboardList, Download, Loader2, Pencil, Plus, Save, Trash2 } from 'lucide-react';
+import { ClipboardList, KeyRound, Download, Loader2, Pencil, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,7 +17,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok',
 const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: today(), parentWebsite: '', type: 'new' });
 type Entry = ReturnType<typeof newEntry>;
 type Row = { id: number; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
-type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string }; deadlineMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
+type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string; role: string }; deadlineMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
 
 function Dropdown({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: { value: string; label: string }[]; disabled?: boolean; onChange: (value: string) => void }) {
   return <div className="grid gap-2 text-sm font-medium"><label htmlFor={id}>{label}</label>
@@ -126,7 +128,7 @@ export function WorkSubmissionsPanel() {
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / 100));
   const canSubmit = Boolean(data?.window.canSubmit && now < data.deadlineMs);
   return <Tabs value={tab} onValueChange={setTab}>
-    <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger></TabsList>
+    <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger>{data?.currentUser.role === 'hr' && <TabsTrigger value="api"><KeyRound /> API / เชื่อมระบบ</TabsTrigger>}</TabsList>
     <TabsContent value="create">
       <section className="panel">
         <div className="panel-heading mb-5"><div><p className="section-kicker">NEW WORK SUBMISSION</p><h2>บันทึกส่งงานใหม่</h2>
@@ -179,6 +181,7 @@ export function WorkSubmissionsPanel() {
         </div>
       </section>
     </TabsContent>
+    {data?.currentUser.role === 'hr' && <TabsContent value="api"><WorkSubmissionApiPanel currentTeam={data.currentUser.team} /></TabsContent>}
     <Dialog open={Boolean(editTarget)} onOpenChange={open => { if (!open && !saving) setEditTarget(null); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>แก้ไขรายการส่งงาน</DialogTitle><DialogDescription>แก้ไขรายการของตัวเองได้ก่อน 10:00 น. เวลาไทย</DialogDescription></DialogHeader>
         {editTarget && <form onSubmit={saveEdit} className="space-y-5">

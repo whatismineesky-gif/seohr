@@ -12,6 +12,7 @@ test('submission ownership, team filters, pagination and validation use authenti
     INSERT INTO hr_employees VALUES('A','เอ','ทีม 1'),('B','บี','ทีม 2');
     INSERT INTO hr_system_users VALUES('a@test','["dashboard","attendance"]'),('b@test','[]'),('c@test','["dashboard","submissions"]');`);
   sqlite.exec(readFileSync(new URL('../migrations/1022_work_submissions.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/1023_work_submission_integrations.sql', import.meta.url), 'utf8'));
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('a@test').menu_permissions), ['dashboard','attendance','submissions']);
   assert.equal(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('b@test').menu_permissions, '[]');
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('c@test').menu_permissions), ['dashboard','submissions']);
