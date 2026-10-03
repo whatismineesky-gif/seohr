@@ -18,7 +18,7 @@ const types = [{ value: 'new', label: 'เว็บใหม่' }, { value: '30
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: defaultSubmissionDate(), parentWebsite: '', type: 'new' });
 type Entry = ReturnType<typeof newEntry>;
-type Row = { id: number; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
+type Row = { id: number; employeeId: string; authorName: string; team: string; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
 type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string; role: string }; clockOffsetMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
 
 function Dropdown({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: { value: string; label: string }[]; disabled?: boolean; onChange: (value: string) => void }) {
@@ -176,13 +176,14 @@ export function WorkSubmissionsPanel() {
           {scope === 'team' && <div className="min-w-44"><Dropdown id="submission-team" label="ทีม" value={team} onChange={value => { setTeam(value); setPage(1); }} options={data?.teams.length ? data.teams : [{ value: team, label: team === '__unassigned__' ? 'ยังไม่ระบุทีม' : team }]} /></div>}
         </div>
         {error && <p role="alert" className="mb-4 text-sm text-rose-600">{error}</p>}
-        <Table><TableHeader><TableRow><TableHead>คีย์</TableHead><TableHead>เว็บ</TableHead><TableHead>วันที่</TableHead><TableHead>เว็บแม่</TableHead><TableHead>ประเภท</TableHead><TableHead className="text-right">จัดการ</TableHead></TableRow></TableHeader>
-          <TableBody>{loading ? <TableRow><TableCell colSpan={6} className="py-10 text-center">กำลังโหลด...</TableCell></TableRow> : data?.items.length ? data.items.map(row => <TableRow key={row.id}>
+        <Table><TableHeader><TableRow><TableHead>ชื่อผู้ส่ง</TableHead><TableHead>รหัสพนักงาน</TableHead><TableHead>ทีม</TableHead><TableHead>คีย์</TableHead><TableHead>เว็บ</TableHead><TableHead>วันที่</TableHead><TableHead>เว็บแม่</TableHead><TableHead>ประเภท</TableHead><TableHead className="text-right">จัดการ</TableHead></TableRow></TableHeader>
+          <TableBody>{loading ? <TableRow><TableCell colSpan={9} className="py-10 text-center">กำลังโหลด...</TableCell></TableRow> : data?.items.length ? data.items.map(row => <TableRow key={row.id}>
+            <TableCell className="whitespace-nowrap font-medium">{row.authorName || '—'}</TableCell><TableCell className="whitespace-nowrap">{row.employeeId || '—'}</TableCell><TableCell className="whitespace-nowrap">{row.team || 'ยังไม่ระบุทีม'}</TableCell>
             <TableCell className="max-w-72 whitespace-normal break-words">{row.keyword}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.website}</TableCell>
             <TableCell>{new Date(`${row.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.parentWebsite}</TableCell>
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
             <TableCell className="text-right">{row.canEdit ? <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการของฉัน' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button> : '—'}</TableCell>
-          </TableRow>) : <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
+          </TableRow>) : <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><span>{data?.total ?? 0} รายการ · หน้าละ 100 รายการ</span>
           <div className="flex items-center gap-3"><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage(current => current - 1)}>ก่อนหน้า</Button><span>หน้า {page} / {pages}</span><Button variant="outline" disabled={loading || page >= pages} onClick={() => setPage(current => current + 1)}>ถัดไป</Button></div>

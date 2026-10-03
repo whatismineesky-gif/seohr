@@ -103,13 +103,14 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
   const { where, args, page } = filters(user, params);
   const db = getD1();
   const [rows, count, teams, employee] = await Promise.all([
-    db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type, author_email FROM hr_work_submissions ${where}
+    db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type, employee_id, author_name, team, author_email FROM hr_work_submissions ${where}
       ORDER BY work_date DESC, id DESC LIMIT 100 OFFSET ?`).bind(...args, (page - 1) * 100).all<Record<string, unknown>>(),
     db.prepare(`SELECT COUNT(*) AS total FROM hr_work_submissions ${where}`).bind(...args).first<{ total: number }>(),
     db.prepare(`SELECT team FROM hr_employees WHERE team <> '' UNION SELECT team FROM hr_work_submissions ORDER BY team`).all<{ team: string }>(),
     employeeInfo(user),
   ]);
   return { items: rows.results.map(row => ({ id: Number(row.id), keyword: String(row.keyword), website: String(row.website),
+    employeeId: String(row.employee_id ?? ''), authorName: String(row.author_name ?? ''), team: String(row.team ?? ''),
     date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type), canEdit: String(row.author_email).toLowerCase() === user.email.toLowerCase() })),
     total: Number(count?.total ?? 0), page, pageSize: 100,
     window: submissionWindow(),
