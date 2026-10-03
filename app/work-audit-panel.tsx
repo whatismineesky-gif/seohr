@@ -8,6 +8,7 @@ import {
   History,
   Loader2,
   Save,
+  RefreshCw,
   Search,
   Settings2,
 } from "lucide-react";
@@ -46,6 +47,7 @@ type WorkAuditRow = {
   targetCount: number;
   targetPending: boolean;
   submittedCount: number;
+  systemSubmittedCount: number;
   missingCount: number;
   resultStatus: ReviewStatus;
   reason: string;
@@ -237,7 +239,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
         (team === "all" || row.team === team) &&
         (resultStatus === "all" ||
           resultFor(
-            drafts[row.id]?.submittedCount ?? row.targetCount,
+            drafts[row.id]?.submittedCount ?? row.submittedCount,
             row.targetCount,
           ) === resultStatus) &&
         (!keyword ||
@@ -291,7 +293,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
           reviewDate,
           rows: data.rows.map((row) => ({
             employeeId: row.id,
-            submittedCount: drafts[row.id]?.submittedCount ?? row.targetCount,
+            submittedCount: drafts[row.id]?.submittedCount ?? row.submittedCount,
             reason: drafts[row.id]?.reason ?? "",
             changeReason: drafts[row.id]?.changeReason ?? "",
           })),
@@ -554,12 +556,15 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               <p className="text-sm font-medium text-slate-500">DAILY WORK AUDIT</p>
               <h2 className="mt-1 text-xl font-semibold">ตรวจการส่งงานรายวัน</h2>
               <p className="mt-1 text-sm text-slate-500">
-                ระบบตั้งค่าเริ่มต้นเป็นส่งครบ แก้ไขเฉพาะพนักงานที่ส่งไม่ครบหรือไม่ส่งงาน
+                นับจำนวนเว็บจากตารางส่งงานใหม่ตามวันที่ในรายการ ใช้ยอดนี้เป็นค่าเริ่มต้นสำหรับคนที่ยังไม่ตรวจ และเทียบกับเป้าหมายของแต่ละคน
               </p>
               <p className="mt-2 text-xs text-indigo-700">
                 สถานะที่นำมาตรวจ: {attendanceStatusOptions.filter((option) => data.statusConfig.includedStatuses.includes(option.value)).map((option) => option.label).join(" / ") || "ไม่ได้เลือกสถานะ"}
               </p>
             </div>
+            <Button variant="outline" disabled={saving || loading || data.rows.some(isChanged)} onClick={() => void loadData()} title="บันทึกการแก้ไขก่อนรีเฟรช">
+              <RefreshCw /> รีเฟรชยอดส่ง
+            </Button>
             <label className="field-label w-full sm:w-52">
               วันที่ตรวจ
               <Input
@@ -630,7 +635,8 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                 <TableRow>
                   <TableHead>พนักงาน</TableHead>
                   <TableHead className="text-center">เป้าหมาย</TableHead>
-                  <TableHead className="min-w-36">ส่งจริง</TableHead>
+                  <TableHead className="min-w-36">ส่งในระบบ</TableHead>
+                  <TableHead className="min-w-36">ยอดที่ตรวจ</TableHead>
                   <TableHead>ผลตรวจ</TableHead>
                   <TableHead className="min-w-64">เหตุผล</TableHead>
                   <TableHead className="min-w-56">เหตุผลการแก้ไข</TableHead>
@@ -639,8 +645,8 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
               <TableBody>
                 {filteredRows.map((row) => {
                   const draft = drafts[row.id] ?? {
-                    submittedCount: row.targetCount,
-                    reason: "",
+                    submittedCount: row.submittedCount,
+                    reason: row.reason,
                     changeReason: "",
                   };
                   const status = resultFor(draft.submittedCount, row.targetCount);
@@ -661,6 +667,11 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                       <TableCell className="text-center font-semibold">
                         {row.targetCount}
                         {row.targetPending && <span className="block text-xs font-normal text-amber-700">รอยืนยันเป้าหมายใหม่</span>}
+                      </TableCell>
+                      <TableCell>
+                        <strong className="text-indigo-700">{row.systemSubmittedCount} เว็บ</strong>
+                        {draft.submittedCount !== row.systemSubmittedCount && <span className="block text-xs text-amber-700">ต่างจากยอดที่ตรวจ</span>}
+                        <Button className="mt-1" type="button" size="sm" variant="outline" onClick={() => setSubmitted(row, row.systemSubmittedCount)}>ใช้ยอดในระบบ</Button>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -717,7 +728,7 @@ export function WorkAuditPanel({ mode }: { mode: "review" | "config" }) {
                 })}
                 {!filteredRows.length && (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-10 text-center text-slate-500">
+                    <TableCell colSpan={7} className="py-10 text-center text-slate-500">
                       ไม่พบพนักงานตามเงื่อนไขที่เลือก
                     </TableCell>
                   </TableRow>

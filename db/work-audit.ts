@@ -156,7 +156,7 @@ export async function getWorkAuditData(
   const database = getD1();
   const employees = await scopedEmployees(user, reviewDate);
   const employeeIds = new Set(employees.map((employee) => employee.id));
-  const [targetResult, reviewResult, configResult] = await database.batch<Record<string, unknown>>([
+  const [targetResult, reviewResult, configResult, submissionResult] = await database.batch<Record<string, unknown>>([
     database
       .prepare(
         "SELECT month, target_per_day, updated_by_email, updated_at FROM hr_daily_work_targets WHERE month = ?",
@@ -174,6 +174,8 @@ export async function getWorkAuditData(
       `SELECT month, target_per_day, updated_by_email, updated_at
        FROM hr_daily_work_targets ORDER BY month DESC LIMIT 24`,
     ),
+    database.prepare(`SELECT employee_id, COUNT(*) AS submitted_count
+      FROM hr_work_submissions WHERE work_date = ? GROUP BY employee_id`).bind(reviewDate),
   ]);
   const targetRow = targetResult.results[0];
   const configuredTarget = Number(targetRow?.target_per_day ?? 0);
@@ -183,15 +185,18 @@ export async function getWorkAuditData(
       .filter((row) => employeeIds.has(String(row.employee_id)))
       .map((row) => [String(row.employee_id), row]),
   );
+  const submissionCounts = new Map(submissionResult.results.map((row) =>
+    [String(row.employee_id), Number(row.submitted_count)]));
   const rows = employees.map((employee) => {
     const review = reviewMap.get(employee.id);
     const savedTarget = Number(review?.target_count ?? employeeTargets.get(employee.id) ?? configuredTarget);
     const targetCount = !summaryOnly && employeeTargets.has(employee.id)
       ? Number(employeeTargets.get(employee.id) ?? configuredTarget) : savedTarget;
     const targetPending = Boolean(review && targetCount !== savedTarget);
-    const submittedCount = Number(review?.submitted_count ?? targetCount);
+    const systemSubmittedCount = submissionCounts.get(employee.id) ?? 0;
+    const submittedCount = Number(review?.submitted_count ?? systemSubmittedCount);
     const resultStatus = String(
-      targetPending ? statusFor(submittedCount, targetCount) : review?.result_status ?? "complete",
+      targetPending ? statusFor(submittedCount, targetCount) : review?.result_status ?? statusFor(submittedCount, targetCount),
     ) as ReviewStatus;
     return {
       ...employee,
@@ -200,13 +205,14 @@ export async function getWorkAuditData(
       targetCount,
       targetPending,
       submittedCount,
+      systemSubmittedCount,
       missingCount: Math.max(0, targetCount - submittedCount),
       resultStatus,
       reason: targetPending
         ? resultStatus === "complete" ? ""
           : String(review?.reason ?? "") && String(review?.reason) !== defaultReason(String(review?.result_status) as ReviewStatus, savedTarget, submittedCount)
             ? String(review?.reason) : defaultReason(resultStatus, targetCount, submittedCount)
-        : String(review?.reason ?? ""),
+        : String(review?.reason ?? defaultReason(resultStatus, targetCount, submittedCount)),
       attendanceRecordId: review?.attendance_record_id
         ? Number(review.attendance_record_id)
         : null,
@@ -411,6 +417,11 @@ export async function confirmDailyWork(
   const existingMap = new Map(
     existingResult.results.map((row) => [String(row.employee_id), row]),
   );
+  const submissionResult = await database.prepare(`SELECT employee_id, COUNT(*) AS submitted_count
+    FROM hr_work_submissions WHERE work_date = ? GROUP BY employee_id`).bind(reviewDate)
+    .all<Record<string, unknown>>();
+  const submissionCounts = new Map(submissionResult.results.map((row) =>
+    [String(row.employee_id), Number(row.submitted_count)]));
   const changes: Array<{
     employeeId: string;
     targetCount: number;
@@ -429,13 +440,13 @@ export async function confirmDailyWork(
     const targetChanged = Boolean(previous && Number(previous.target_count) !== targetCount);
     const submittedCount = Math.max(
       0,
-      Math.round(Number(row?.submittedCount ?? targetCount)),
+      Math.round(Number(row?.submittedCount ?? previous?.submitted_count ?? submissionCounts.get(employee.id) ?? 0)),
     );
     const resultStatus = statusFor(submittedCount, targetCount);
     const reason =
       resultStatus === "complete"
         ? ""
-        : String(row?.reason ?? "").trim() ||
+        : String(row?.reason ?? previous?.reason ?? "").trim() ||
           defaultReason(resultStatus, targetCount, submittedCount);
     const changeReason = String(row?.changeReason ?? "").trim() ||
       (targetChanged && Number(previous?.submitted_count) === submittedCount ? "ปรับเป้าหมายตาม Config เฉพาะพนักงาน" : "");

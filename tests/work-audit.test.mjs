@@ -16,6 +16,7 @@ function fixture() {
     reason TEXT, recorder_user_id TEXT, recorder_email TEXT, recorder_role TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE hr_work_submissions (employee_id TEXT, work_date TEXT, submission_type TEXT, created_at TEXT);
   INSERT INTO hr_employees (id, sequence, nickname, team) VALUES
     ('A', 1, 'A', 'SEO 1'), ('B', 2, 'B', 'SEO 1'), ('C', 3, 'C', 'SEO 2');`);
   for (const file of ['1014_daily_work_audit.sql', '1018_employee_daily_work_targets.sql', '1019_daily_work_review_target_logs.sql', '1020_daily_work_status_filter.sql']) {
@@ -246,5 +247,38 @@ test('HR can create and edit admin/true records with audit history, without new 
   await assert.rejects(attendance.createAttendanceRecord(employee, { ...input, recordType: 'late' }), /พนักงานบันทึกได้เฉพาะ/);
   await assert.rejects(attendance.createAttendanceRecord(audit, { ...input, recordType: 'meeting_leave' }), /Audit/);
   assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
+  f.sqlite.close();
+});
+
+
+test('submission counts use work date across midnight, employee scope and individual targets without writing reviews', async () => {
+  const f = fixture();
+  await f.saveWorkTarget(hr, { month: '2026-10', targetPerDay: 3 });
+  await f.saveEmployeeWorkTarget(hr, { employeeId: 'B', effectiveDate: '2026-10-03', targetPerDay: 1 });
+  f.sqlite.exec(`INSERT INTO hr_work_submissions VALUES
+    ('A','2026-10-03','new','2026-10-03 08:00:00'),
+    ('A','2026-10-03','301','2026-10-03 09:00:00'),
+    ('A','2026-10-03','301_new','2026-10-04 01:00:00'),
+    ('A','2026-10-04','new','2026-10-03 08:00:00'),
+    ('B','2026-10-03','new','2026-10-04 01:00:00'),
+    (NULL,'2026-10-03','new','2026-10-04 01:00:00');`);
+  const data = await f.getWorkAuditData(hr, '2026-10-03');
+  assert.deepEqual(data.rows.map(r => [r.systemSubmittedCount, r.submittedCount, r.targetCount, r.resultStatus]),
+    [[3,3,3,'complete'],[1,1,1,'complete'],[0,0,3,'none']]);
+  assert.equal(data.summary.unreviewed, 3);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS count FROM hr_daily_work_reviews').get().count, 0);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS count FROM hr_attendance_records').get().count, 0);
+  assert.deepEqual(f.payroll, []);
+  const own = await f.getWorkAuditData({ ...hr, role: 'employee', employeeId: 'B' }, '2026-10-03');
+  assert.deepEqual(own.rows.map(r => [r.id, r.systemSubmittedCount]), [['B',1]]);
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-04')).rows[0].systemSubmittedCount, 1);
+  await f.confirmDailyWork(hr, {reviewDate: '2026-10-03', rows: []});
+  f.sqlite.exec("INSERT INTO hr_work_submissions VALUES ('A','2026-10-03','new','2026-10-04 01:30:00')");
+  const saved = (await f.getWorkAuditData(hr, '2026-10-03')).rows[0];
+  assert.equal(saved.submittedCount, 3);
+  assert.equal(saved.systemSubmittedCount, 4);
+  await f.confirmDailyWork(hr, {reviewDate: '2026-10-03', rows: []});
+  assert.equal((await f.getWorkAuditData(hr, '2026-10-03')).rows[0].submittedCount, 3);
+  await assert.rejects(f.confirmDailyWork(hr, {reviewDate: '2026-10-03', rows: [{employeeId:'A',submittedCount:4}]}), /เหตุผลการแก้ไข/);
   f.sqlite.close();
 });
