@@ -1,8 +1,9 @@
 import { getD1 } from './index';
 import type { SystemUser } from './attendance';
 const owned = `((n.source_kind = 'work_submission' AND lower(n.actor_email) = lower(?)) OR
-  (n.source_kind <> 'work_submission' AND n.employee_id <> '' AND n.employee_id = ? AND lower(n.actor_email) <> lower(?) AND (n.actor_user_id = '' OR n.actor_user_id <> ?)))`;
-function bindings(user: SystemUser) { return [user.email, user.employeeId ?? '', user.email, user.userId]; }
+  (n.source_kind NOT IN ('work_submission', 'attendance_retro') AND n.employee_id <> '' AND n.employee_id = ? AND lower(n.actor_email) <> lower(?) AND (n.actor_user_id = '' OR n.actor_user_id <> ?)) OR
+  (n.source_kind = 'attendance_retro' AND ? = 'hr' AND lower(n.actor_email) <> lower(?) AND (n.actor_user_id = '' OR n.actor_user_id <> ?)))`;
+function bindings(user: SystemUser) { return [user.email, user.employeeId ?? '', user.email, user.userId, user.role ?? '', user.email, user.userId]; }
 export async function getNotifications(user: SystemUser, before = 0) {
   const db = getD1();
   const [rows, count] = await Promise.all([
