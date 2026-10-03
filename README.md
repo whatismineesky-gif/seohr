@@ -14,6 +14,16 @@
 
 Migration ไม่ลบตารางหรือข้อมูลเดิม และจะคัดลอกข้อมูลพนักงานจากตาราง `employees` เดิมไปยัง `hr_employees` เพียงครั้งเดียว
 
+## API ตารางส่งงานใหม่
+
+HR จัดการ API Key ได้ที่ **ตารางส่งงานใหม่ → API / เชื่อมระบบ** หลังเผยแพร่เวอร์ชันล่าสุด รองรับสิทธิ์เฉพาะทีมหรือทั้งหมด วันหมดอายุ และการปิดใช้งาน Key
+
+- Endpoint: `GET /api/integrations/work-submissions`
+- Authentication: `Authorization: Bearer YOUR_API_KEY`
+- ตัวกรอง: `date` (วันที่ในงาน), `submittedDate` (วันกดส่งจริงตามเวลาไทย), `team`, `page`
+- ต้องระบุวันที่อย่างน้อยหนึ่งค่า หน้าละ 100 รายการ จำกัด 60 คำขอต่อนาทีต่อ Key
+- คู่มือและตัวอย่าง JSON / Node.js: [docs/work-submissions-api.md](docs/work-submissions-api.md)
+
 ## Base framework
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
