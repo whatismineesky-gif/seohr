@@ -1,5 +1,7 @@
 "use client";
 
+import { defaultSubmissionDate, workSubmissionWindow } from '@/lib/work-submission-window';
+
 import { WorkSubmissionApiPanel } from "./work-submission-api-panel";
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
@@ -14,10 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const types = [{ value: 'new', label: 'เว็บใหม่' }, { value: '301', label: 'เว็บ 301' }, { value: '301_new', label: 'เว็บ 301 ขึ้นใหม่' }];
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: today(), parentWebsite: '', type: 'new' });
+const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: defaultSubmissionDate(), parentWebsite: '', type: 'new' });
 type Entry = ReturnType<typeof newEntry>;
 type Row = { id: number; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
-type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string; role: string }; deadlineMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
+type Data = { items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string; role: string }; clockOffsetMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
 
 function Dropdown({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: { value: string; label: string }[]; disabled?: boolean; onChange: (value: string) => void }) {
   return <div className="grid gap-2 text-sm font-medium"><label htmlFor={id}>{label}</label>
@@ -62,7 +64,7 @@ export function WorkSubmissionsPanel() {
         const response = await fetch(`/api/work-submissions?${params}`, { cache: 'no-store', signal: controller.signal });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'โหลดรายการส่งงานไม่สำเร็จ');
-        if (!controller.signal.aborted) { setNow(Date.now()); setData({ ...result, deadlineMs: Date.now() + Date.parse(result.window.closesAt) - Date.parse(result.window.serverNow) }); }
+        if (!controller.signal.aborted) { setNow(Date.now()); setData({ ...result, clockOffsetMs: Date.parse(result.window.serverNow) - Date.now() }); }
       } catch (failure) {
         if (!controller.signal.aborted) { setData(null); setError(failure instanceof Error ? failure.message : 'โหลดรายการส่งงานไม่สำเร็จ'); }
       } finally { if (!controller.signal.aborted) setLoading(false); }
@@ -105,7 +107,7 @@ export function WorkSubmissionsPanel() {
 
   async function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editTarget || !canSubmit || saving) return;
+    if (!editTarget || !canSaveEdit || saving) return;
     setSaving(true);
     try {
       const response = await fetch('/api/work-submissions', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(editTarget) });
@@ -126,7 +128,12 @@ export function WorkSubmissionsPanel() {
   }
 
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / 100));
-  const canSubmit = Boolean(data?.window.canSubmit && now < data.deadlineMs);
+  const serverTime = new Date(now + (data?.clockOffsetMs ?? 0));
+  const dateOpen = (date: string) => Boolean(data && workSubmissionWindow(date, serverTime).canSubmit);
+  const canSubmit = entries.every(entry => dateOpen(entry.date));
+  const originalEditDate = data?.items.find(row => row.id === editTarget?.id)?.date;
+  const canSaveEdit = Boolean(editTarget && originalEditDate && dateOpen(originalEditDate) && dateOpen(editTarget.date));
+  const formatTime = (value: string) => value ? new Date(value).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }) : 'กรุณาระบุวันที่ให้ถูกต้อง';
   return <Tabs value={tab} onValueChange={setTab}>
     <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger>{data?.currentUser.role === 'hr' && <TabsTrigger value="api"><KeyRound /> API / เชื่อมระบบ</TabsTrigger>}</TabsList>
     <TabsContent value="create">
@@ -134,7 +141,7 @@ export function WorkSubmissionsPanel() {
         <div className="panel-heading mb-5"><div><p className="section-kicker">NEW WORK SUBMISSION</p><h2>บันทึกส่งงานใหม่</h2>
           <p className="mt-2 text-sm text-muted-foreground">ผู้ส่ง: {data?.currentUser.name ?? 'บัญชีที่ล็อกอิน'} · {data?.currentUser.team || 'ยังไม่ระบุทีม'}</p>
         </div></div>
-        <p className={`mb-5 rounded-lg border px-4 py-3 text-sm ${canSubmit ? 'border-indigo-200 bg-indigo-50 text-indigo-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`} role="status">{!data ? (loading ? 'กำลังตรวจสอบเวลารับส่งงาน...' : 'ไม่สามารถตรวจสอบเวลารับส่งงานได้ กรุณารีเฟรช') : canSubmit ? 'เปิดรับส่งงานถึงก่อน 10:00 น. เวลาไทย · บันทึกทุกรายการพร้อมกัน' : 'ปิดรับส่งงานแล้ว เปิดรับอีกครั้งหลังเที่ยงคืน · ส่งงานก่อน 10:00 น. เวลาไทย'}</p>
+        <p className="mb-5 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900" role="status">เลือกวันที่ของงานได้ตลอดเวลา · ส่งและแก้ไขงานตั้งแต่ 14:00 น. ของวันที่ระบุ ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย · บันทึกทุกรายการพร้อมกัน</p>
         {error && <p role="alert" className="mb-4 text-sm text-rose-600">{error}</p>}
         <form onSubmit={submit} className="space-y-4">
           {entries.map((entry, index) => <fieldset key={entry.rowId} disabled={saving} className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
@@ -147,6 +154,7 @@ export function WorkSubmissionsPanel() {
               <label className="grid gap-2 text-sm font-medium">เว็บแม่<Input required maxLength={500} placeholder="parent.com" value={entry.parentWebsite} onChange={e => update(entry.rowId, 'parentWebsite', e.target.value)} /></label>
               <Dropdown id={`submission-type-${entry.rowId}`} label="ประเภท" value={entry.type} options={types} disabled={saving} onChange={value => update(entry.rowId, 'type', value)} />
             </div>
+            <p className={`mt-3 text-sm ${dateOpen(entry.date) ? 'text-green-700' : 'text-amber-700'}`} role="status">{(() => { const period = workSubmissionWindow(entry.date, serverTime); return `${dateOpen(entry.date) ? 'เปิดรับส่งงาน' : 'อยู่นอกช่วงรับส่งงาน'} · ${formatTime(period.opensAt)} ถึงก่อน ${formatTime(period.closesAt)} เวลาไทย`; })()}</p>
           </fieldset>)}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Button type="button" variant="outline" className="border-indigo-200 text-indigo-700" disabled={saving || entries.length >= 100} onClick={() => setEntries(current => [...current, newEntry(String(nextId.current++))])}><Plus /> เพิ่มรายการ</Button>
@@ -173,7 +181,7 @@ export function WorkSubmissionsPanel() {
             <TableCell className="max-w-72 whitespace-normal break-words">{row.keyword}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.website}</TableCell>
             <TableCell>{new Date(`${row.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{row.parentWebsite}</TableCell>
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
-            <TableCell className="text-right">{row.canEdit ? <Button size="sm" variant="outline" disabled={!canSubmit || saving} title={canSubmit ? 'แก้ไขรายการของฉัน' : 'ปิดรับแก้ไขตั้งแต่ 10:00 น. เวลาไทย'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button> : '—'}</TableCell>
+            <TableCell className="text-right">{row.canEdit ? <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการของฉัน' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button> : '—'}</TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><span>{data?.total ?? 0} รายการ · หน้าละ 100 รายการ</span>
@@ -183,7 +191,7 @@ export function WorkSubmissionsPanel() {
     </TabsContent>
     {data?.currentUser.role === 'hr' && <TabsContent value="api"><WorkSubmissionApiPanel currentTeam={data.currentUser.team} /></TabsContent>}
     <Dialog open={Boolean(editTarget)} onOpenChange={open => { if (!open && !saving) setEditTarget(null); }}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>แก้ไขรายการส่งงาน</DialogTitle><DialogDescription>แก้ไขรายการของตัวเองได้ก่อน 10:00 น. เวลาไทย</DialogDescription></DialogHeader>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>แก้ไขรายการส่งงาน</DialogTitle><DialogDescription>แก้ไขรายการของตัวเองได้ในช่วง 14:00 น. ของวันที่รายการ ถึงก่อน 10:00 น. ของวันถัดไป หากเปลี่ยนวันที่ ทั้งวันที่เดิมและใหม่ต้องอยู่ในช่วงรับงาน</DialogDescription></DialogHeader>
         {editTarget && <form onSubmit={saveEdit} className="space-y-5">
           <fieldset disabled={saving} className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium">คีย์<Input required maxLength={250} value={editTarget.keyword} onChange={e => editField('keyword', e.target.value)} /></label>
@@ -192,8 +200,8 @@ export function WorkSubmissionsPanel() {
             <label className="grid gap-2 text-sm font-medium">เว็บแม่<Input required maxLength={500} value={editTarget.parentWebsite} onChange={e => editField('parentWebsite', e.target.value)} /></label>
             <Dropdown id="submission-edit-type" label="ประเภท" value={editTarget.type} options={types} disabled={saving} onChange={value => editField('type', value)} />
           </fieldset>
-          {!canSubmit && <p role="alert" className="text-sm text-amber-700">ปิดรับแก้ไขแล้ว กรุณาดำเนินการก่อน 10:00 น. เวลาไทย</p>}
-          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={() => setEditTarget(null)}>ยกเลิก</Button><Button type="submit" disabled={saving || !canSubmit}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกการแก้ไข</Button></div>
+          {!canSaveEdit && <p role="alert" className="text-sm text-amber-700">วันที่เดิมหรือวันที่ใหม่อยู่นอกช่วงรับแก้ไขงาน</p>}
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={() => setEditTarget(null)}>ยกเลิก</Button><Button type="submit" disabled={saving || !canSaveEdit}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกการแก้ไข</Button></div>
         </form>}
       </DialogContent>
     </Dialog>

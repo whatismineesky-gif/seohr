@@ -1,16 +1,15 @@
+import { defaultSubmissionDate, workSubmissionWindow } from '../lib/work-submission-window';
 import { getD1 } from './index';
 import type { SystemUser } from './attendance';
 
 export const submissionTypes = ['new', '301', '301_new'] as const;
 
-export function submissionWindow(now = new Date()) {
-  const date = new Date(now.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const closesAt = `${date}T10:00:00+07:00`;
-  return { date, closesAt, serverNow: now.toISOString(), canSubmit: now.getTime() < Date.parse(closesAt) };
+export function submissionWindow(now = new Date(), date = defaultSubmissionDate(now)) {
+  return workSubmissionWindow(date, now);
 }
 
-function assertOpen(now: Date) {
-  if (!submissionWindow(now).canSubmit) throw new Error('ปิดรับส่งงานแล้ว กรุณาส่งงานก่อน 10:00 น. เวลาไทย');
+function assertOpen(date: string, now: Date) {
+  if (!submissionWindow(now, date).canSubmit) throw new Error(`วันที่ ${date} ส่งและแก้ไขงานได้ตั้งแต่ 14:00 น. ของวันนั้น ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย`);
 }
 
 function requiredText(value: unknown, label: string, max: number) {
@@ -38,17 +37,18 @@ function validateSubmission(input: Record<string, unknown>) {
 }
 
 function validateDate(date: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '1900-01-01' || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < '1900-01-01' || date > '9998-12-31' || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
     throw new Error('กรุณาระบุวันที่ให้ถูกต้อง');
   }
 }
 
 export async function createWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
-  assertOpen(clock());
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('ข้อมูลส่งงานไม่ถูกต้อง');
   const entries = input.items === undefined ? [input] : input.items;
   if (!Array.isArray(entries) || entries.length < 1 || entries.length > 100) throw new Error('กรุณาส่งงานครั้งละ 1–100 รายการ');
   const validated = entries.map(validateSubmission);
+  const startedAt = clock();
+  validated.forEach(item => assertOpen(item.date, startedAt));
   const employee = await employeeInfo(user);
   const db = getD1();
   const statements = validated.map(({ keyword, website, parent, date, type }) => db.prepare(`INSERT INTO hr_work_submissions
@@ -56,26 +56,28 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`).bind(keyword, website, date, parent, type,
       employee?.id ?? null, employee?.team ?? '', user.email.toLowerCase(), employee?.nickname || user.displayName || user.email));
   const now = clock();
-  assertOpen(now);
+  validated.forEach(item => assertOpen(item.date, now));
   statements.push(db.prepare(`INSERT INTO hr_notifications
     (employee_id, source_kind, source_id, actor_email, actor_user_id, actor_name, event_date, action, details)
     VALUES (?, 'work_submission', last_insert_rowid(), ?, ?, ?, ?, 'submitted', ?)`)
     .bind(employee?.id ?? '', user.email.toLowerCase(), user.userId ?? '', employee?.nickname || user.displayName || user.email,
-      submissionWindow(now).date, JSON.stringify({ count: validated.length })));
+      new Date(now.getTime() + 7 * 3600000).toISOString().slice(0, 10), JSON.stringify({ count: validated.length })));
   const results = await db.batch(statements);
   return { count: validated.length, id: results[validated.length - 1].meta.last_row_id };
 }
 
 export async function editWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
-  assertOpen(clock());
   const fields = validateSubmission(input);
+  assertOpen(fields.date, clock());
   const id = Number(input.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
   const db = getD1();
-  const owned = await db.prepare('SELECT id FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
-    .bind(id, user.email).first<{ id: number }>();
+  const owned = await db.prepare('SELECT id, work_date FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
+    .bind(id, user.email).first<{ id: number; work_date: string }>();
   if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์แก้ไขรายการนี้');
-  assertOpen(clock());
+  const now = clock();
+  assertOpen(owned.work_date, now);
+  assertOpen(fields.date, now);
   await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND author_email = ? COLLATE NOCASE`)
     .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, user.email).run();
