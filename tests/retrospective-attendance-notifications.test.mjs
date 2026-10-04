@@ -13,6 +13,7 @@ test('past-date attendance changes notify other HR only, atomically, with Bangko
  CREATE TABLE hr_daily_work_review_logs(id INTEGER);
  CREATE TABLE hr_employee_daily_work_target_logs(id INTEGER);`);
  sqlite.exec(readFileSync(new URL('../migrations/1021_personal_notifications.sql', import.meta.url),'utf8'));
+ sqlite.exec(readFileSync(new URL('../migrations/1027_system_announcements.sql',import.meta.url),'utf8'));
  sqlite.exec(readFileSync(new URL('../migrations/1025_retrospective_attendance_notifications.sql', import.meta.url),'utf8'));
  const insert = sqlite.prepare('INSERT INTO hr_attendance_audit_logs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
  const add=(id, oldDate,newDate,createdAt, action='edit',oldStatus='absence',newStatus='true',oldReason='old',newReason='new',recordId=99)=>insert.run(id,recordId,'A','Alice',action,oldDate,newDate,oldStatus,newStatus,oldReason,newReason,'hr1@test','hr1','HR1',createdAt);

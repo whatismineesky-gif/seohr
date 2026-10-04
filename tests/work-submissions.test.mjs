@@ -19,6 +19,7 @@ test('submission ownership, team filters, pagination and validation use authenti
   assert.deepEqual(JSON.parse(sqlite.prepare('SELECT menu_permissions FROM hr_system_users WHERE email=?').get('c@test').menu_permissions), ['dashboard','submissions']);
   sqlite.exec(`CREATE TABLE hr_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT,employee_id TEXT NOT NULL,source_kind TEXT,source_id INTEGER,actor_email TEXT,actor_user_id TEXT,actor_name TEXT,event_date TEXT,action TEXT,details TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(source_kind,source_id));
     CREATE TABLE hr_notification_reads(user_email TEXT,notification_id INTEGER,read_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(user_email,notification_id));`);
+  sqlite.exec(readFileSync(new URL('../migrations/1027_system_announcements.sql',import.meta.url),'utf8'));
   const db = { batch(statements) { sqlite.exec('BEGIN'); try { const results=statements.map(stmt=>stmt.run());sqlite.exec('COMMIT');return results; } catch(error){sqlite.exec('ROLLBACK');throw error;} }, prepare(sql) { let args = []; const stmt = {
     bind(...values) { args = values; return stmt; },
     first() { return sqlite.prepare(sql).get(...args) ?? null; },

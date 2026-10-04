@@ -10,6 +10,7 @@ test('notifications capture changes atomically, hide self actions, restrict owne
  CREATE TABLE hr_daily_work_review_logs(id INTEGER PRIMARY KEY,employee_id TEXT,review_date TEXT,previous_status TEXT,new_status TEXT,previous_submitted_count INTEGER,new_submitted_count INTEGER,previous_reason TEXT,new_reason TEXT,change_reason TEXT,previous_target_count INTEGER,new_target_count INTEGER,actor_email TEXT,actor_user_id TEXT,actor_display_name TEXT);
  CREATE TABLE hr_employee_daily_work_target_logs(id INTEGER PRIMARY KEY,employee_id TEXT,effective_date TEXT,previous_target INTEGER,new_target INTEGER,actor_email TEXT,actor_name TEXT);`);
  sqlite.exec(readFileSync(new URL('../migrations/1021_personal_notifications.sql',import.meta.url),'utf8'));
+ sqlite.exec(readFileSync(new URL('../migrations/1027_system_announcements.sql',import.meta.url),'utf8'));
  sqlite.exec(`INSERT INTO hr_attendance_records VALUES (1,'B','2026-10-02','late','test','hr@test','hr-id','manual'),(2,'B','2026-10-03','admin','self','b@test','b-id','manual'),(3,'C','2026-10-02','true','private','hr@test','hr-id','manual'),(4,'B','2026-10-02','absence','auto','hr@test','hr-id','work_audit');
  INSERT INTO hr_attendance_audit_logs VALUES (1,1,'B','edit','2026-10-02','2026-10-03','late','true','test','fixed','hr@test','hr-id','HR'),(2,1,'B','delete','2026-10-03',NULL,'true',NULL,'fixed',NULL,'hr@test','hr-id','HR');
  INSERT INTO hr_daily_work_review_logs VALUES (1,'B','2026-10-02','complete','none',1,0,'','absent','corrected',1,1,'hr@test','hr-id','HR');

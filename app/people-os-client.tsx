@@ -2,6 +2,8 @@
 
 import { DashboardMonthlyPanel } from "@/app/dashboard-monthly-panel";
 
+import { SystemAnnouncementsPanel } from "./system-announcements-panel";
+import { SystemAnnouncementBanner } from "@/components/system-announcement-banner";
 import { NotificationBell } from "@/components/notification-bell";
 
 import { EmployeeSelectionProvider } from "@/components/searchable-employee-select";
@@ -126,7 +128,8 @@ type View =
   | "warnings"
   | "payroll"
   | "data"
-  | "access";
+  | "access"
+  | "announcements";
 
 type Employee = {
   id: string;
@@ -198,6 +201,7 @@ const currentThaiDate = new Intl.DateTimeFormat("th-TH", {
 }).format(new Date());
 
 const navItems = [
+  { id: "announcements" as View, label: "ประกาศ / รอบอัปเดตระบบ", icon: Settings2 },
   { id: "dashboard" as View, label: "ภาพรวม", icon: LayoutDashboard },
   { id: "employees" as View, label: "พนักงานทั้งหมด", icon: Users },
   { id: "members" as View, label: "MEMBER", icon: UserRoundCheck },
@@ -216,6 +220,7 @@ const viewTitles: Record<
   View,
   { eyebrow: string; title: string; description: string }
 > = {
+  announcements: { eyebrow: "SYSTEM ANNOUNCEMENTS", title: "ประกาศ / รอบอัปเดตระบบ", description: "ตั้งเวลาประกาศ แจ้งเตือนผู้ใช้งาน และจัดการการพักบันทึกระหว่างอัปเดต" },
   dashboard: {
     eyebrow: "HR OVERVIEW",
     title: "ภาพรวมบุคลากรแผนก SEO",
@@ -2177,7 +2182,7 @@ export default function PeopleOSClient() {
   const [accessLoading, setAccessLoading] = useState(true);
   const currentTitle = viewTitles[view];
   const visibleNavItems = access
-    ? navItems.filter((item) => access.permissions.includes(item.id))
+    ? navItems.filter((item) => item.id === "announcements" ? access.currentUser.role === "hr" : access.permissions.includes(item.id))
     : [];
 
   async function loadAccess() {
@@ -2201,7 +2206,7 @@ export default function PeopleOSClient() {
         permissions: result.permissions,
       });
       setView((current) =>
-        result.permissions!.includes(current)
+        (result.permissions!.includes(current) || (current === "announcements" && result.currentUser!.role === "hr"))
           ? current
           : result.permissions![0] || "dashboard",
       );
@@ -2373,6 +2378,7 @@ export default function PeopleOSClient() {
             <span className="top-avatar">HR</span>
           </div>
         </header>
+        {access && <SystemAnnouncementBanner email={access.currentUser.email} />}
 
         <div className="page-shell">
           <div className="page-title-row">
@@ -2407,6 +2413,7 @@ export default function PeopleOSClient() {
               </Button>
             </section>
           )}
+          {!accessLoading && access?.currentUser.role === "hr" && view === "announcements" && <SystemAnnouncementsPanel />}
           {!accessLoading && access && view === "dashboard" && (
             <Dashboard
               employees={employees}

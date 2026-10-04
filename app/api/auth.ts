@@ -1,3 +1,4 @@
+import { pausedAnnouncement } from "@/db/system-announcements";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getSystemAccess, type MenuId } from "@/db/access";
 import type { AuthUser, SystemUser } from "@/db/attendance";
@@ -75,6 +76,17 @@ export async function authorizeApi(
     )
   )
     return { ok: false, response: jsonError("ไม่มีสิทธิ์เข้าใช้งานข้อมูลนี้", 403) };
+  const path = new URL(request.url).pathname;
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && !["/api/system-announcements", "/api/notifications"].includes(path)) {
+    const routeMenus: Record<string,string[]> = {
+      checkin:["checkin"], attendance:["attendance"], "work-audit":["attendance"],
+      "work-submissions":["submissions"], employees:["employees","members","data"], members:["members"],
+      advances:["advances"], warnings:["warnings"], deposits:["warnings"], payroll:["payroll"],
+      resignations:["resignations"], data:["data"], access:["access"], "integration-keys":["submissions"],
+    };
+    const paused = await pausedAnnouncement(routeMenus[path.split("/")[2]] ?? options.anyPermissions ?? []);
+    if (paused) return {ok:false,response:jsonError(`ระบบกำลังอัปเดต: ${paused.title} กรุณารอ HR แจ้งว่าอัปเดตเสร็จแล้วก่อนบันทึก`,503)};
+  }
   return {
     ok: true,
     access: { user: access.currentUser, permissions: access.permissions },
