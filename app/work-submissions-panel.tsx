@@ -48,6 +48,7 @@ export function WorkSubmissionsPanel() {
   const [exporting, setExporting] = useState(false);
   const [now, setNow] = useState(0);
   const [editTarget, setEditTarget] = useState<Row | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -128,6 +129,20 @@ export function WorkSubmissionsPanel() {
     setEditTarget(current => current ? { ...current, [field]: value } : null);
   }
 
+  async function confirmDelete() {
+    if (!deleteTarget || !dateOpen(deleteTarget.date) || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch('/api/work-submissions', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: deleteTarget.id }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || 'ลบรายการส่งงานไม่สำเร็จ');
+      toast.success('ลบรายการส่งงานแล้ว');
+      window.dispatchEvent(new Event('work-submitted'));
+      setDeleteTarget(null); setPage(1); setRefresh(current => current + 1);
+    } catch (failure) { toast.error(failure instanceof Error ? failure.message : 'ลบรายการส่งงานไม่สำเร็จ'); setRefresh(current => current + 1); }
+    finally { setSaving(false); }
+  }
+
   function update(rowId: string, field: keyof Entry, value: string) {
     setEntries(current => current.map(entry => entry.rowId === rowId ? { ...entry, [field]: value } : entry));
   }
@@ -188,7 +203,10 @@ export function WorkSubmissionsPanel() {
             <TableCell><span className="block w-40 truncate" title={row.keyword}>{row.keyword}</span></TableCell><TableCell><span className="block w-48 truncate" title={row.website}>{row.website}</span></TableCell>
             <TableCell>{new Date(`${row.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}{row.isBackfill && <span className="block text-xs text-amber-700" title={`ส่งจริง ${formatTime(row.submittedAt)}`}>ส่งย้อนหลัง</span>}</TableCell><TableCell><span className="block w-72 truncate" title={row.parentWebsite}>{row.parentWebsite}</span></TableCell>
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
-            <TableCell className="text-right">{row.canEdit ? <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการของฉัน' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button> : '—'}</TableCell>
+            <TableCell className="text-right">{row.canEdit ? <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการของฉัน' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button>
+              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'ลบรายการของฉัน' : 'อยู่นอกช่วงเวลาที่อนุญาตให้ลบ'} onClick={() => setDeleteTarget({ ...row })}><Trash2 /> ลบ</Button>
+            </div> : '—'}</TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><span>{data?.total ?? 0} รายการ · หน้าละ 100 รายการ</span>
@@ -198,6 +216,15 @@ export function WorkSubmissionsPanel() {
     </TabsContent>
     {data?.currentUser.role === 'hr' && <TabsContent value="backfill"><WorkSubmissionBackfillPanel onChanged={() => setRefresh(current => current + 1)} /></TabsContent>}
     {data?.currentUser.role === 'hr' && <TabsContent value="api"><WorkSubmissionApiPanel currentTeam={data.currentUser.team} /></TabsContent>}
+    <Dialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open && !saving) setDeleteTarget(null); }}>
+      <DialogContent><DialogHeader><DialogTitle>ยืนยันลบรายการส่งงาน</DialogTitle><DialogDescription>ลบได้เฉพาะรายการของตัวเอง ในช่วง 14:00 น. ของวันที่งาน ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย หรือช่วงย้อนหลังที่ HR เปิดให้ การลบจะลดจำนวนงานที่ส่งของวันที่นั้น</DialogDescription></DialogHeader>
+        {deleteTarget && <>
+          <dl className="grid gap-2 rounded-lg border bg-slate-50 p-4 text-sm"><div><dt className="font-medium">คีย์</dt><dd className="break-all">{deleteTarget.keyword}</dd></div><div><dt className="font-medium">เว็บ</dt><dd className="break-all">{deleteTarget.website}</dd></div><div><dt className="font-medium">วันที่งาน</dt><dd>{new Date(`${deleteTarget.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</dd></div></dl>
+          {!dateOpen(deleteTarget.date) && <p role="alert" className="text-sm text-amber-700">อยู่นอกช่วงเวลาที่อนุญาตให้ลบรายการนี้</p>}
+          <div className="flex justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => setDeleteTarget(null)}>ยกเลิก</Button><Button variant="destructive" disabled={saving || !dateOpen(deleteTarget.date)} onClick={confirmDelete}>{saving ? <Loader2 className="animate-spin" /> : <Trash2 />} ยืนยันลบ</Button></div>
+        </>}
+      </DialogContent>
+    </Dialog>
     <Dialog open={Boolean(editTarget)} onOpenChange={open => { if (!open && !saving) setEditTarget(null); }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>แก้ไขรายการส่งงาน</DialogTitle><DialogDescription>แก้ไขรายการของตัวเองได้ในช่วง 14:00 น. ของวันที่รายการ ถึงก่อน 10:00 น. ของวันถัดไป หรือช่วงย้อนหลังที่ HR เปิดให้ หากเปลี่ยนวันที่ ทั้งวันที่เดิมและใหม่ต้องอยู่ในช่วงรับงาน</DialogDescription></DialogHeader>
         {editTarget && <form onSubmit={saveEdit} className="space-y-5">

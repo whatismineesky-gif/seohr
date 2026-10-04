@@ -1,5 +1,5 @@
 import { authorizeApi, safeApiError } from '@/app/api/auth';
-import { createWorkSubmission, editWorkSubmission, exportWorkSubmissions, getWorkSubmissions, workSubmissionReport } from '@/db/work-submissions';
+import { createWorkSubmission, deleteWorkSubmission, editWorkSubmission, exportWorkSubmissions, getWorkSubmissions, workSubmissionReport } from '@/db/work-submissions';
 
 export async function GET(request: Request) {
   const auth = await authorizeApi(request, { anyPermissions: ['submissions'] });
@@ -40,4 +40,11 @@ export async function PUT(request: Request) {
   if (!auth.ok) return auth.response;
   try { return Response.json(await editWorkSubmission(auth.access.user, await request.json())); }
   catch (error) { return safeApiError(error, 'แก้ไขรายการส่งงานไม่สำเร็จ'); }
+}
+
+export async function DELETE(request: Request) {
+  const auth = await authorizeApi(request, { anyPermissions: ['submissions'] });
+  if (!auth.ok) return auth.response;
+  try { return Response.json(await deleteWorkSubmission(auth.access.user, await request.json())); }
+  catch (error) { return safeApiError(error, 'ลบรายการส่งงานไม่สำเร็จ'); }
 }

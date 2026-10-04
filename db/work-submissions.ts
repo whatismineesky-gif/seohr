@@ -23,7 +23,7 @@ async function assertOpenDates(user: SystemUser, dates: string[], now: Date) {
   return dates.map(date => {
     if (submissionWindow(now, date).canSubmit) return null;
     const grant = grants.find(item => date >= item.start_date && date <= item.end_date);
-    if (!grant) throw new Error(`วันที่ ${date} ส่งและแก้ไขงานได้ตั้งแต่ 14:00 น. ของวันนั้น ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย หรือช่วงส่งย้อนหลังที่ HR เปิดให้`);
+    if (!grant) throw new Error(`วันที่ ${date} ส่งและแก้ไขงานได้ตั้งแต่ 14:00 น. ของวันนั้น ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย หรือช่วงส่งย้อนหลังที่ HR เปิดให้ กรุณาดำเนินการในช่วงเวลาที่กำหนด`);
     return Number(grant.id);
   });
 }
@@ -96,6 +96,29 @@ export async function editWorkSubmission(user: SystemUser, input: Record<string,
   await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND author_email = ? COLLATE NOCASE`)
     .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, user.email).run();
+  return { id };
+}
+
+export async function deleteWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
+  const id = Number(input?.id);
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
+  const db = getD1();
+  const owned = await db.prepare('SELECT id, work_date FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
+    .bind(id, user.email).first<{ id: number; work_date: string }>();
+  if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์ลบรายการนี้');
+  await assertOpenDates(user, [owned.work_date], clock());
+  // Recheck after permission queries so a request crossing the deadline is rejected.
+  const [grantId] = await assertOpenDates(user, [owned.work_date], clock());
+  const period = submissionWindow(clock(), owned.work_date);
+  // Enforce the deadline and grant revocation at the database statement itself.
+  const result = await db.prepare(`DELETE FROM hr_work_submissions
+    WHERE id = ? AND author_email = ? COLLATE NOCASE AND work_date = ? AND (
+      (strftime('%Y-%m-%dT%H:%M:%fZ', 'now') >= ? AND strftime('%Y-%m-%dT%H:%M:%fZ', 'now') < ?)
+      OR EXISTS (SELECT 1 FROM hr_work_submission_backfill_grants g WHERE g.id = ?
+        AND g.revoked_at IS NULL AND g.closes_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        AND g.start_date <= hr_work_submissions.work_date AND g.end_date >= hr_work_submissions.work_date)
+    )`).bind(id, user.email, owned.work_date, new Date(period.opensAt).toISOString(), new Date(period.closesAt).toISOString(), grantId).run();
+  if (Number(result.meta.changes) !== 1) throw new Error('ไม่พบรายการ รายการมีการเปลี่ยนแปลง หรือหมดเวลาลบแล้ว กรุณาโหลดข้อมูลใหม่');
   return { id };
 }
 
