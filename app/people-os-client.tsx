@@ -2182,7 +2182,7 @@ export default function PeopleOSClient() {
   const [accessLoading, setAccessLoading] = useState(true);
   const currentTitle = viewTitles[view];
   const visibleNavItems = access
-    ? navItems.filter((item) => item.id === "announcements" ? access.currentUser.role === "hr" : access.permissions.includes(item.id))
+    ? navItems.filter((item) => item.id === "announcements" ? access.currentUser.role === "hr" : access.permissions.includes(item.id) && (item.id !== "dashboard" || access.currentUser.role === "hr"))
     : [];
 
   async function loadAccess() {
@@ -2208,7 +2208,7 @@ export default function PeopleOSClient() {
       setView((current) =>
         (result.permissions!.includes(current) || (current === "announcements" && result.currentUser!.role === "hr"))
           ? current
-          : result.permissions![0] || "dashboard",
+          : result.currentUser!.role === "hr" ? "dashboard" : "checkin",
       );
     } catch (error) {
       setAccess(null);
@@ -2387,7 +2387,7 @@ export default function PeopleOSClient() {
               <h1>{currentTitle.title}</h1>
               <p>{currentTitle.description}</p>
             </div>
-            {view !== "dashboard" && (
+            {view !== "dashboard" && access?.currentUser.role === "hr" && (
               <Button variant="outline" onClick={() => setView("dashboard")}>
                 <LayoutDashboard /> กลับหน้าภาพรวม
               </Button>
@@ -2414,7 +2414,7 @@ export default function PeopleOSClient() {
             </section>
           )}
           {!accessLoading && access?.currentUser.role === "hr" && view === "announcements" && <SystemAnnouncementsPanel />}
-          {!accessLoading && access && view === "dashboard" && (
+          {!accessLoading && access?.currentUser.role === "hr" && view === "dashboard" && (
             <Dashboard
               employees={employees}
               canOpenAttendance={access.permissions.includes("attendance")}

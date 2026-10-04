@@ -33,8 +33,8 @@ async function hashPassword(password: string) {
 
 const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
   hr: [...menuIds],
-  audit: ["dashboard", "employees", "members", "checkin", "attendance", "submissions"],
-  employee: ["dashboard", "checkin", "attendance", "submissions"],
+  audit: ["employees", "members", "checkin", "attendance", "submissions"],
+  employee: ["checkin", "attendance", "submissions"],
 };
 
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
@@ -42,7 +42,7 @@ function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
     const parsed = JSON.parse(String(value ?? "[]"));
     if (Array.isArray(parsed) && parsed.length)
       return menuIds.filter(
-        (id) => id === "dashboard" || id === "checkin" || parsed.includes(id),
+        (id) => id === "dashboard" ? role === "hr" : id === "checkin" || parsed.includes(id),
       );
   } catch { /* ใช้ค่าเริ่มต้นตามบทบาท */ }
   return roleDefaults[role];
@@ -111,8 +111,8 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
   const loginUsername = String(input.loginUsername ?? "").trim();
   const password = String(input.password ?? "");
   const requested = Array.isArray(input.permissions) ? input.permissions.map(String) : [];
-  const permissions = menuIds.filter((id) => requested.includes(id));
-  if (!permissions.includes("dashboard")) permissions.unshift("dashboard");
+  const permissions = menuIds.filter((id) => requested.includes(id) && (id !== "dashboard" || userRole === "hr"));
+  if (userRole === "hr" && !permissions.includes("dashboard")) permissions.unshift("dashboard");
   if (!permissions.includes("checkin"))
     permissions.splice(permissions.includes("dashboard") ? 1 : 0, 0, "checkin");
   if (!email || !email.includes("@")) throw new Error("กรุณาระบุอีเมลให้ถูกต้อง");
@@ -290,7 +290,7 @@ export async function createEmployeeUsersBulk(
           userId,
           String(employee.nickname || employeeId),
           employeeId,
-          JSON.stringify(["dashboard", "checkin", "attendance", "submissions"]),
+          JSON.stringify(roleDefaults.employee),
           username,
         ),
     );

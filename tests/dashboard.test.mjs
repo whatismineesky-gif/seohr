@@ -49,11 +49,7 @@ test('monthly SQL summaries respect permissions, ownership and actual saved tota
  assert.equal(section('ยอดฝากและใบเตือน').metrics.find(m=>m.label==='ยังไม่บันทึกยอดฝาก').value,1);
  assert.equal(section('เงินเดือนที่บันทึกจริง').metrics.find(m=>m.unit==='บาท').value,579);
  assert.equal(section('ยอดผ่อนและเงินเบิกล่วงหน้า').metrics[0].value,300);
- const own=await api.getMonthlyDashboard({role:'employee',email:'A@TEST',employeeId:'A'},permissions,'2026-09',new Date('2026-10-02'));
- assert.equal(own.sections.find(s=>s.menu==='submissions').recorded,1);
- assert.equal(own.sections.find(s=>s.menu==='payroll').metrics.find(m=>m.unit==='บาท').value,123);
- assert.equal(own.sections.find(s=>s.menu==='advances').metrics[0].value,100);
+ for (const role of ['employee','audit']) await assert.rejects(api.getMonthlyDashboard({role,email:'A@TEST',employeeId:'A'},permissions,'2026-09',new Date('2026-10-02')), /เฉพาะ HR/);
  const denied=await api.getMonthlyDashboard(user,['dashboard'],'2026-09');assert.equal(denied.sections.length,0);assert.equal(denied.followups.length,0);
- const unlinked=await api.getMonthlyDashboard({role:'employee',email:'unknown@test',employeeId:null},permissions,'2026-09'); assert.ok(unlinked.sections.every(s=>s.recorded===0));
  const blank=await api.getMonthlyDashboard(user,permissions,'2026-08',new Date('2026-10-02')); assert.ok(blank.sections.every(s=>s.recorded===0));
 });

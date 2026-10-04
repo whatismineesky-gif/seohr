@@ -74,8 +74,8 @@ const menus = [
 
 const defaults: Record<Role, string[]> = {
   hr: menus.map(([id]) => id),
-  audit: ["dashboard", "employees", "members", "checkin", "attendance", "submissions"],
-  employee: ["dashboard", "checkin", "attendance", "submissions"],
+  audit: ["employees", "members", "checkin", "attendance", "submissions"],
+  employee: ["checkin", "attendance", "submissions"],
 };
 
 export function AccessPanel({
@@ -409,7 +409,7 @@ export function AccessPanel({
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {menus.map(([id, label]) => {
-                const selected = form.permissions.includes(id);
+                const selected = id === "dashboard" ? form.role === "hr" : form.permissions.includes(id);
                 return (
                   <button
                     key={id}
@@ -417,8 +417,8 @@ export function AccessPanel({
                     onClick={() => togglePermission(id)}
                     disabled={id === "dashboard" || id === "checkin"}
                     title={
-                      id === "dashboard" || id === "checkin"
-                        ? "ผู้ใช้ทุกคนเข้าถึงเมนูนี้ได้"
+                      id === "dashboard" ? "หน้าภาพรวมเปิดให้เฉพาะ HR"
+                        : id === "checkin" ? "ผู้ใช้ทุกคนเข้าถึงเมนูนี้ได้"
                         : undefined
                     }
                     className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${selected ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-900" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"} ${id === "dashboard" || id === "checkin" ? "cursor-not-allowed opacity-80" : ""}`}
@@ -427,7 +427,7 @@ export function AccessPanel({
                       {label}
                       {(id === "dashboard" || id === "checkin") && (
                         <span className="ml-2 text-xs font-normal text-indigo-600">
-                          สิทธิ์พื้นฐาน
+                          {id === "dashboard" ? "เฉพาะ HR" : "สิทธิ์พื้นฐาน"}
                         </span>
                       )}
                     </span>
