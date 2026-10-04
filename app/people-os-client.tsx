@@ -172,7 +172,7 @@ type EmployeeSortKey =
 
 type SortDirection = "asc" | "desc";
 
-const initialEmployees = hrData.employees.map((employee, index) => ({
+const initialEmployees = (hrData.employees as Employee[]).map((employee, index) => ({
   ...employee,
   sequence: index + 1,
   fullName: "",

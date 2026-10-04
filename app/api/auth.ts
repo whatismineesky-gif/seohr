@@ -1,3 +1,4 @@
+import { sameApplicationOrigin } from "@/lib/request-origin";
 import { pausedAnnouncement } from "@/db/system-announcements";
 import { getChatGPTUser } from "@/app/chatgpt-auth";
 import { getSystemAccess, type MenuId } from "@/db/access";
@@ -19,21 +20,9 @@ function jsonError(error: string, status: number) {
   );
 }
 
-function localUser(request: Request): AuthUser | null {
-  const hostname = new URL(request.url).hostname;
-  return ["localhost", "127.0.0.1", "terminal.local"].includes(hostname)
-    ? {
-        userId: "local-qa",
-        email: "qa@local.test",
-        displayName: "Local HR",
-      }
-    : null;
-}
-
 function sameOrigin(request: Request) {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
-  const origin = request.headers.get("origin");
-  return Boolean(origin && origin === new URL(request.url).origin);
+  return sameApplicationOrigin(request);
 }
 
 export async function authorizeApi(
@@ -60,7 +49,7 @@ export async function authorizeApi(
         email: authenticated.email,
         displayName: authenticated.displayName,
       }
-    : localUser(request);
+    : null;
   if (!auth)
     return { ok: false, response: jsonError("กรุณาเข้าสู่ระบบ", 401) };
   const access = await getSystemAccess(auth);

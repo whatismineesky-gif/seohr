@@ -8,7 +8,7 @@ export type DashboardSection = { title: string; menu: string; recorded: number; 
 export async function getMonthlyDashboard(user: SystemUser, permissions: MenuId[], value: string, now = new Date()) {
   if (user.role !== "hr") throw new Error("ไม่มีสิทธิ์เข้าหน้าภาพรวม เฉพาะ HR เท่านั้น");
   const range = monthRange(value, now), db = getD1();
-  const own = user.role === "employee";
+  const own: boolean = false;
   const rows = async (sql: string, ...args: (string | number)[]) => (await db.prepare(sql).bind(...args).all<Row>()).results;
   const scope = own ? " AND employee_id = ?" : "";
   const scopedArgs = own ? [user.employeeId ?? ""] : [];

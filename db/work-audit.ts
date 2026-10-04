@@ -24,7 +24,7 @@ export async function saveWorkStatusConfig(user: SystemUser, input: Record<strin
   return { includedStatuses: statuses };
 }
 
-async function runBatches(statements: D1PreparedStatement[]) {
+async function runBatches(statements: ReturnType<ReturnType<typeof getD1>["prepare"]>[]) {
   const database = getD1();
   for (let index = 0; index < statements.length; index += 50) {
     await database.batch(statements.slice(index, index + 50));

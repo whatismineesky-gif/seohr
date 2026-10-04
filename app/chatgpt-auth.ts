@@ -14,6 +14,7 @@ export async function requireChatGPTUser(
 
   const { redirect } = await import("next/navigation");
   redirect(chatGPTSignInPath(returnTo));
+  throw new Error("Redirect did not terminate the request");
 }
 
 export function chatGPTSignInPath(returnTo: string): string {

@@ -1,3 +1,4 @@
+import { sameApplicationOrigin } from "@/lib/request-origin";
 import { NextRequest, NextResponse } from "next/server";
 import { getD1 } from "@/db";
 import { SESSION_COOKIE } from "@/app/session-auth";
@@ -32,8 +33,7 @@ async function verifyPassword(password: string, encoded: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const origin = request.headers.get("origin");
-  if (origin !== request.nextUrl.origin)
+  if (!sameApplicationOrigin(request))
     return NextResponse.json(
       { error: "คำขอไม่ได้รับอนุญาต" },
       { status: 403, headers: { "cache-control": "no-store" } },
