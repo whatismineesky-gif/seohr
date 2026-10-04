@@ -142,9 +142,16 @@ async function ensureSession(user: SystemUser, employeeId: string, workDate: str
   return session;
 }
 
-export async function getCheckinData(user: SystemUser) {
+async function meetingLateExempt(employeeId: string, workDate: string) {
+  const record = await getD1().prepare(`SELECT id FROM hr_attendance_records
+    WHERE employee_id = ? AND record_date = ? AND record_type IN ('absence', 'meeting_leave') LIMIT 1`)
+    .bind(employeeId, workDate).first<{ id: number }>();
+  return Boolean(record);
+}
+
+export async function getCheckinData(user: SystemUser, clock = () => new Date()) {
   const config = await getConfig();
-  const now = bangkokNow();
+  const now = bangkokNow(clock());
   let employee = null;
   let todaySession = null;
   let checkoutSession = null;
@@ -167,6 +174,7 @@ export async function getCheckinData(user: SystemUser) {
     history = historyResult.results.map(mapSession);
   }
 
+  const lateExempt = employee ? await meetingLateExempt(employee.id, now.date) : false;
   const isStaff = employee?.position.trim().toLowerCase() === "staff";
   const meetingStart = isStaff
     ? config.staffMeetingStart
@@ -201,7 +209,8 @@ export async function getCheckinData(user: SystemUser) {
     availability: {
       meetingStart,
       meetingCanStart: config.systemEnabled && Boolean(employee) && !todaySession?.meetingStartedAt && now.minutes >= timeToMinutes(meetingStart),
-      meetingWouldBeLate: now.minutes > timeToMinutes(config.meetingLateAfter),
+      meetingLateExempt: lateExempt,
+      meetingWouldBeLate: !lateExempt && now.minutes > timeToMinutes(config.meetingLateAfter),
       meetingCanEnd: Boolean(
         config.systemEnabled &&
           employee &&
@@ -220,12 +229,12 @@ export async function getCheckinData(user: SystemUser) {
   };
 }
 
-export async function startMeeting(user: SystemUser) {
+export async function startMeeting(user: SystemUser, clock = () => new Date()) {
   const employee = await employeeFor(user);
   const config = await getConfig();
   if (!config.systemEnabled)
     throw new Error("ระบบเช็คชื่อยังไม่เปิดใช้งาน");
-  const now = bangkokNow();
+  const now = bangkokNow(clock());
   const isStaff = employee.position.trim().toLowerCase() === "staff";
   const allowedFrom = isStaff ? config.staffMeetingStart : config.otherMeetingStart;
   if (now.minutes < timeToMinutes(allowedFrom))
@@ -233,7 +242,8 @@ export async function startMeeting(user: SystemUser) {
   const session = await ensureSession(user, employee.id, now.date);
   if (session.meetingStartedAt) throw new Error("คุณกดเข้าประชุมวันนี้แล้ว");
 
-  const late = now.minutes > timeToMinutes(config.meetingLateAfter);
+  const lateExempt = await meetingLateExempt(employee.id, now.date);
+  const late = !lateExempt && now.minutes > timeToMinutes(config.meetingLateAfter);
   const database = getD1();
   await database.prepare(`
     UPDATE hr_employee_checkins

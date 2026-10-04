@@ -74,6 +74,7 @@ type CheckinData = {
     meetingStart: string;
     meetingCanStart: boolean;
     meetingWouldBeLate: boolean;
+    meetingLateExempt: boolean;
     meetingCanEnd: boolean;
     workEndAvailable: boolean;
     workCanEnd: boolean;
@@ -226,7 +227,7 @@ export function CheckinPanel() {
             <div className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-indigo-50 text-indigo-700"><LogIn /></span><div><p className="section-kicker">STEP 1</p><h2>เข้าประชุม</h2></div></div><StatusIcon done={Boolean(today?.meetingStartedAt)} /></div>
             <div className="mt-5 flex-1 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
               <p>ตำแหน่งนี้เริ่มกดได้ <strong className="text-slate-900">{data.availability.meetingStart} น.</strong></p>
-              <p className="mt-1">หลัง <strong className="text-rose-600">{config.meetingLateAfter} น.</strong> ระบบบันทึก “มาสาย” อัตโนมัติ</p>
+              {data.availability.meetingLateExempt ? <p className="mt-1 font-medium text-emerald-700">วันนี้มีรายการหยุดงานหรือลาประชุม · เช็คชื่อแล้วไม่บันทึกมาสาย</p> : <p className="mt-1">หลัง <strong className="text-rose-600">{config.meetingLateAfter} น.</strong> ระบบบันทึก “มาสาย” อัตโนมัติ</p>}
               {today?.meetingStartedAt && <p className="mt-3 font-medium text-emerald-700">บันทึกแล้ว {thaiTime(today.meetingStartedAt)} น. {today.meetingLate ? "· สาย" : "· ตรงเวลา"}</p>}
             </div>
             <Button className="mt-4 w-full" disabled={!data.availability.meetingCanStart || Boolean(action)} onClick={() => void submit("meeting_start")}>
