@@ -12,24 +12,21 @@ function wrangler(...args) {
   });
 }
 
-const databases = JSON.parse(wrangler("d1", "list", "--json"));
-const database = databases.find((item) => item.name === databaseName);
-if (!database?.uuid) throw new Error(`ไม่พบ D1 ชื่อ ${databaseName} ในบัญชี Cloudflare นี้`);
-
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 config.name = workerName;
 config.hyperdrive = [{ binding: 'HYPERDRIVE', id: 'd788523963fc47e4a0eb262772b6cb92' }];
-// Stage PostgreSQL connectivity while D1 remains authoritative. Switch only
-// after freezing writes and importing a fresh, reconciled D1 snapshot.
-config.vars = { ...config.vars, DATABASE_PROVIDER: 'd1', MAINTENANCE_MODE: '1' };
+// Activate only after the final frozen snapshot has been synchronized and verified.
+// Keep D1 bound as a frozen archive; application reads and writes use PostgreSQL.
+config.vars = { ...config.vars, DATABASE_PROVIDER: 'postgres', MAINTENANCE_MODE: '0' };
 config.routes = [{ pattern: "dev.member-seo.com", custom_domain: true }];
 config.d1_databases = [{
   binding: "DB",
   database_name: databaseName,
-  database_id: database.uuid,
+  database_id: 'd5336781-88a9-4708-b3cd-9f261d3734ba',
   migrations_dir: "../../migrations",
 }];
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
-wrangler("d1", "migrations", "apply", databaseName, "--remote", "--config", configPath);
+// SQLite migrations must not be executed against the archived D1 or PostgreSQL.
+// Apply reviewed PostgreSQL schema migrations on the VPS before future schema changes.
 wrangler("deploy", "--config", configPath);

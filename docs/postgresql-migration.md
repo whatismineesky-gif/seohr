@@ -2,9 +2,11 @@
 
 The application has a PostgreSQL adapter for its existing database API. Each operation opens a client through Hyperdrive; each batch uses a single transaction and closes the client afterwards. A failed batch rolls back submissions and their notification together. Parameters remain bound values, and timestamps retain the existing UTC text format.
 
-## Staged deployment
+## Production connection
 
-`scripts/deploy-cloudflare.mjs` binds `HYPERDRIVE` to configuration `d788523963fc47e4a0eb262772b6cb92` and explicitly keeps `DATABASE_PROVIDER=d1`. The final synchronization stage sets `MAINTENANCE_MODE=1`: middleware returns a maintenance document and rejects database API calls before authentication, including session changes, integration request counters and notification reads. Database accessors also reject requests while the gate is active. `/api/migration-status` confirms the gate without touching either database. D1 remains the source of truth. There is no automatic fallback between providers, which would split writes between two databases.
+`scripts/deploy-cloudflare.mjs` binds `HYPERDRIVE` to configuration `d788523963fc47e4a0eb262772b6cb92`, sets `DATABASE_PROVIDER=postgres` and reopens the application with `MAINTENANCE_MODE=0`. Merge this configuration only after the final synchronization succeeds. D1 stays bound as a frozen archive, and the deploy script no longer applies SQLite migrations. There is no automatic fallback between providers, which would split writes between two databases.
+
+The maintenance gate remains available for future migration work. Set `MAINTENANCE_MODE=1` in the deployment configuration to return the maintenance document and reject database API calls before authentication, including session changes, integration request counters and notification reads. Database accessors also reject requests while the gate is active. `/api/migration-status` confirms the gate without touching either database.
 
 An authenticated HR can open `/api/database-status` to verify the Worker → Hyperdrive → Tunnel → PostgreSQL path. This endpoint reads counts only and returns no employee details or connection credentials. An unauthenticated request is denied; other roles cannot access it.
 
@@ -18,6 +20,10 @@ An authenticated HR can open `/api/database-status` to verify the Worker → Hyp
 6. Validate login, attendance, check-in, daily review, submissions, notification ownership, warning totals, payroll and the external date-filtered API before reopening writes.
 
 Rollback after PostgreSQL has accepted writes requires synchronizing those writes back first. Switching the provider alone would lose recent changes.
+
+## Future schema changes
+
+The existing `migrations/` directory and Drizzle SQLite schema are the historical D1 schema. They are not a PostgreSQL migration workflow. Review and apply PostgreSQL-compatible migration SQL on the VPS before deploying code that requires new columns or tables, and record the applied migration. The final snapshot already contains all 29 migrations through `1028_employee_early_checkin.sql`.
 
 ## Verification
 
