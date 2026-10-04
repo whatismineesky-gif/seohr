@@ -15,6 +15,7 @@ export function getDb() {
 }
 
 export function getD1(): D1Database {
+  if (env.MAINTENANCE_MODE === '1') throw new Error('ระบบกำลังย้ายฐานข้อมูล');
   if (env.DATABASE_PROVIDER === 'postgres') return getPostgres();
   if (env.DATABASE_PROVIDER && env.DATABASE_PROVIDER !== 'd1') throw new Error('Database provider is not configured correctly');
   if (!env.DB) {
@@ -24,6 +25,7 @@ export function getD1(): D1Database {
 }
 
 export function getPostgres(): D1Database {
+  if (env.MAINTENANCE_MODE === '1') throw new Error('ระบบกำลังย้ายฐานข้อมูล');
   if (!env.HYPERDRIVE?.connectionString) throw new Error('PostgreSQL binding is unavailable');
   // Hyperdrive owns the connection pool. Never share live sockets across requests.
   // Keep timestamps as strings to preserve existing API payloads and date handling.
