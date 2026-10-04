@@ -18,6 +18,10 @@ if (!database?.uuid) throw new Error(`ไม่พบ D1 ชื่อ ${database
 
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 config.name = workerName;
+config.hyperdrive = [{ binding: 'HYPERDRIVE', id: 'd788523963fc47e4a0eb262772b6cb92' }];
+// Stage PostgreSQL connectivity while D1 remains authoritative. Switch only
+// after freezing writes and importing a fresh, reconciled D1 snapshot.
+config.vars = { ...config.vars, DATABASE_PROVIDER: 'd1' };
 config.routes = [{ pattern: "dev.member-seo.com", custom_domain: true }];
 config.d1_databases = [{
   binding: "DB",

@@ -37,7 +37,7 @@ export async function listAdvances(employeeId?: string) {
     JOIN hr_employees e ON e.id = a.employee_id
     LEFT JOIN hr_advance_installments i ON i.advance_id = a.id
     ${condition}
-    GROUP BY a.id
+    GROUP BY a.id, e.id
     ORDER BY a.status ASC, a.created_at DESC, a.id DESC
   `);
   const rows = employeeId
