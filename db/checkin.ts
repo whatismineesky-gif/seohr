@@ -62,7 +62,7 @@ function validTime(value: unknown) {
   return text;
 }
 
-function mapConfig(row?: Record<string, unknown>): CheckinConfig {
+function mapConfig(row?: Record<string, unknown> | null): CheckinConfig {
   if (!row) return defaultConfig;
   return {
     systemEnabled: Boolean(row.system_enabled),
@@ -75,7 +75,7 @@ function mapConfig(row?: Record<string, unknown>): CheckinConfig {
   };
 }
 
-function mapSession(row?: Record<string, unknown>) {
+function mapSession(row?: Record<string, unknown> | null) {
   if (!row) return null;
   return {
     id: Number(row.id),
@@ -149,6 +149,29 @@ async function meetingLateExempt(employeeId: string, workDate: string) {
   return Boolean(record);
 }
 
+async function personalMeetingStart(employeeId: string) {
+  const row = await getD1().prepare("SELECT meeting_start FROM hr_employee_checkin_overrides WHERE employee_id = ?")
+    .bind(employeeId).first<{meeting_start:string}>();
+  return row?.meeting_start ?? null;
+}
+
+export async function saveEarlyCheckin(user: SystemUser, input: Record<string, unknown>) {
+  if (user.role !== "hr") throw new Error("เฉพาะ HR เท่านั้นที่กำหนดเวลาเช็คชื่อรายบุคคลได้");
+  const employeeId = typeof input.employeeId === "string" ? input.employeeId.trim() : "";
+  if (!employeeId || typeof input.enabled !== "boolean") throw new Error("กรุณาเลือกพนักงานและรูปแบบเวลาเช็คชื่อให้ถูกต้อง");
+  const db = getD1();
+  const employee = await db.prepare("SELECT id FROM hr_employees WHERE id = ?").bind(employeeId).first();
+  if (!employee) throw new Error("ไม่พบพนักงาน");
+  if (input.enabled) {
+    await db.prepare(`INSERT INTO hr_employee_checkin_overrides(employee_id,meeting_start,updated_by_email)
+      VALUES(?,'12:00',?) ON CONFLICT(employee_id) DO UPDATE SET meeting_start='12:00',updated_by_email=excluded.updated_by_email,updated_at=CURRENT_TIMESTAMP`)
+      .bind(employeeId,user.email).run();
+  } else {
+    await db.prepare("DELETE FROM hr_employee_checkin_overrides WHERE employee_id = ?").bind(employeeId).run();
+  }
+  return {ok:true};
+}
+
 export async function getCheckinData(user: SystemUser, clock = () => new Date()) {
   const config = await getConfig();
   const now = bangkokNow(clock());
@@ -161,7 +184,7 @@ export async function getCheckinData(user: SystemUser, clock = () => new Date())
     employee = await employeeFor(user);
     const checkoutWorkDate = previousDate(now.date);
     const database = getD1();
-    const [todayRow, checkoutRow, historyResult] = await database.batch([
+    const [todayRow, checkoutRow, historyResult] = await database.batch<Record<string, unknown>>([
       database.prepare("SELECT * FROM hr_employee_checkins WHERE employee_id = ? AND work_date = ?").bind(employee.id, now.date),
       database.prepare("SELECT * FROM hr_employee_checkins WHERE employee_id = ? AND work_date = ?").bind(employee.id, checkoutWorkDate),
       database.prepare(`
@@ -176,9 +199,8 @@ export async function getCheckinData(user: SystemUser, clock = () => new Date())
 
   const lateExempt = employee ? await meetingLateExempt(employee.id, now.date) : false;
   const isStaff = employee?.position.trim().toLowerCase() === "staff";
-  const meetingStart = isStaff
-    ? config.staffMeetingStart
-    : config.otherMeetingStart;
+  const personalStart = employee ? await personalMeetingStart(employee.id) : null;
+  const meetingStart = personalStart ?? (isStaff ? config.staffMeetingStart : config.otherMeetingStart);
   const checkoutWorkDate = previousDate(now.date);
   const workEndAvailable =
     now.minutes >= timeToMinutes(config.workEndStart) &&
@@ -192,7 +214,13 @@ export async function getCheckinData(user: SystemUser, clock = () => new Date())
       (SELECT COUNT(*) FROM hr_attendance_records WHERE source_type = 'checkin' AND record_date = '2026-10-03') AS remaining_attendance
   `).first<Record<string, number>>() : null;
 
+  const earlyCheckinConfig = user.role === "hr" ? {
+    employees: (await getD1().prepare("SELECT id,nickname,team,status FROM hr_employees ORDER BY team,nickname,id").all<{id:string;nickname:string;team:string;status:string}>()).results,
+    overrides: (await getD1().prepare(`SELECT o.employee_id AS employeeId,e.nickname,e.team,o.meeting_start AS meetingStart,o.updated_by_email AS updatedBy,o.updated_at AS updatedAt
+      FROM hr_employee_checkin_overrides o JOIN hr_employees e ON e.id=o.employee_id ORDER BY e.team,e.nickname,e.id`).all()).results,
+  } : null;
   return {
+    earlyCheckinConfig,
     resetSummary,
     currentUser: {
       displayName: user.displayName,
@@ -208,6 +236,7 @@ export async function getCheckinData(user: SystemUser, clock = () => new Date())
     history,
     availability: {
       meetingStart,
+      personalMeetingStart: Boolean(personalStart),
       meetingCanStart: config.systemEnabled && Boolean(employee) && !todaySession?.meetingStartedAt && now.minutes >= timeToMinutes(meetingStart),
       meetingLateExempt: lateExempt,
       meetingWouldBeLate: !lateExempt && now.minutes > timeToMinutes(config.meetingLateAfter),
@@ -236,7 +265,7 @@ export async function startMeeting(user: SystemUser, clock = () => new Date()) {
     throw new Error("ระบบเช็คชื่อยังไม่เปิดใช้งาน");
   const now = bangkokNow(clock());
   const isStaff = employee.position.trim().toLowerCase() === "staff";
-  const allowedFrom = isStaff ? config.staffMeetingStart : config.otherMeetingStart;
+  const allowedFrom = await personalMeetingStart(employee.id) ?? (isStaff ? config.staffMeetingStart : config.otherMeetingStart);
   if (now.minutes < timeToMinutes(allowedFrom))
     throw new Error(`กดเข้าประชุมได้ตั้งแต่เวลา ${allowedFrom} น.`);
   const session = await ensureSession(user, employee.id, now.date);

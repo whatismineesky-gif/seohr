@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { SearchableEmployeeSelect } from "@/components/searchable-employee-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,7 @@ type CheckinSession = {
 };
 
 type CheckinData = {
+  earlyCheckinConfig: {employees:{id:string;nickname:string;team:string;status:string}[];overrides:{employeeId:string;nickname:string;team:string;meetingStart:string;updatedBy:string;updatedAt:string}[]} | null;
   resetSummary: { removed_checkins: number; removed_attendance: number; remaining_checkins: number; remaining_attendance: number } | null;
   currentUser: {
     displayName: string;
@@ -72,6 +74,7 @@ type CheckinData = {
   history: CheckinSession[];
   availability: {
     meetingStart: string;
+    personalMeetingStart: boolean;
     meetingCanStart: boolean;
     meetingWouldBeLate: boolean;
     meetingLateExempt: boolean;
@@ -114,6 +117,7 @@ export function CheckinPanel() {
   const [answer, setAnswer] = useState("");
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState("");
+  const [earlyEmployeeId, setEarlyEmployeeId] = useState("");
 
   async function load() {
     setLoading(true);
@@ -226,7 +230,7 @@ export function CheckinPanel() {
           <section className="panel flex flex-col">
             <div className="flex items-center justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-indigo-50 text-indigo-700"><LogIn /></span><div><p className="section-kicker">STEP 1</p><h2>เข้าประชุม</h2></div></div><StatusIcon done={Boolean(today?.meetingStartedAt)} /></div>
             <div className="mt-5 flex-1 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-              <p>ตำแหน่งนี้เริ่มกดได้ <strong className="text-slate-900">{data.availability.meetingStart} น.</strong></p>
+              <p>เวลาเริ่มเช็คชื่อของคุณ <strong className="text-slate-900">{data.availability.meetingStart} น.</strong>{data.availability.personalMeetingStart && <span className="ml-2 text-indigo-700">(กำหนดรายบุคคล)</span>}</p>
               {data.availability.meetingLateExempt ? <p className="mt-1 font-medium text-emerald-700">วันนี้มีรายการหยุดงานหรือลาประชุม · เช็คชื่อแล้วไม่บันทึกมาสาย</p> : <p className="mt-1">หลัง <strong className="text-rose-600">{config.meetingLateAfter} น.</strong> ระบบบันทึก “มาสาย” อัตโนมัติ</p>}
               {today?.meetingStartedAt && <p className="mt-3 font-medium text-emerald-700">บันทึกแล้ว {thaiTime(today.meetingStartedAt)} น. {today.meetingLate ? "· สาย" : "· ตรงเวลา"}</p>}
             </div>
@@ -269,6 +273,11 @@ export function CheckinPanel() {
       </TabsContent>
 
       {isHr && <TabsContent value="config" className="space-y-5">
+        <section className="panel">
+          <div className="panel-heading"><div><p className="section-kicker">EARLY CHECK-IN</p><h2>พนักงานที่เช็คชื่อได้ตั้งแต่ 12:00 น.</h2><p className="mt-2 text-sm text-muted-foreground">กำหนดเฉพาะพนักงานที่ต้องเริ่มก่อนเวลา คนอื่นใช้เวลาตามตำแหน่งเดิม เวลาตัดสายยังใช้ค่ากลาง</p></div></div>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row"><div className="flex-1"><SearchableEmployeeSelect employees={data.earlyCheckinConfig?.employees ?? []} value={earlyEmployeeId} onChange={setEarlyEmployeeId} disabled={Boolean(action)} /></div><Button disabled={!earlyEmployeeId || Boolean(action)} onClick={()=>void submit("save_early_checkin",{employeeId:earlyEmployeeId,enabled:true})}><Save /> กำหนดเวลา 12:00</Button></div>
+          <div className="mt-5 space-y-3">{!data.earlyCheckinConfig?.overrides.length && <p className="text-sm text-muted-foreground">ยังไม่มีพนักงานที่กำหนดเวลาเฉพาะ</p>}{data.earlyCheckinConfig?.overrides.map(item=><div key={item.employeeId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"><div className="min-w-0"><p className="break-words font-medium">{item.employeeId} · {item.nickname} · {item.team}</p><p className="text-sm text-indigo-700">เริ่มเช็คชื่อ {item.meetingStart} น.</p></div><Button variant="outline" disabled={Boolean(action)} onClick={()=>void submit("save_early_checkin",{employeeId:item.employeeId,enabled:false})}>ใช้เวลาตามตำแหน่งเดิม</Button></div>)}</div>
+        </section>
         {data.resetSummary && <section className="panel">
           <h2>ผลล้างข้อมูลทดสอบเช็คชื่อ 3 ต.ค. 2569</h2>
           <p className="mt-2 text-sm">ล้างรายการเช็คชื่อ {data.resetSummary.removed_checkins} รายการ และรายการลงเวลาที่สร้างจากการเช็คชื่อ {data.resetSummary.removed_attendance} รายการ</p>

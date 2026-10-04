@@ -82,6 +82,13 @@ test('submission ownership, team filters, pagination and validation use authenti
   const recordCount=()=>sqlite.prepare('SELECT COUNT(*) AS n FROM hr_work_submissions').get().n;
   const beforeCount=recordCount(), beforeNotices=sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notifications').get().n;
   await assert.rejects(api.createWorkSubmission(a,{items:[input,{...input,keyword:''}]})); assert.equal(recordCount(),beforeCount);
+  for (const field of ['keyword','website','date','parentWebsite','type']) {
+    for (const value of ['', '   ', undefined]) {
+      await assert.rejects(api.createWorkSubmission(a,{items:[input,{...input,[field]:value}]}));
+      assert.equal(recordCount(),beforeCount);
+      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notifications').get().n,beforeNotices);
+    }
+  }
   sqlite.exec(`CREATE TRIGGER reject_test_submission BEFORE INSERT ON hr_work_submissions WHEN NEW.website='fail.com' BEGIN SELECT RAISE(ABORT,'test failure');END;`);
   await assert.rejects(api.createWorkSubmission(a,{items:[input,{...input,website:'fail.com'}]}));
   assert.equal(recordCount(),beforeCount);assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_notifications').get().n,beforeNotices);

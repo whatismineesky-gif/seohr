@@ -6,6 +6,7 @@ import {
   endWork,
   getCheckinData,
   saveCheckinConfig,
+  saveEarlyCheckin,
   startMeeting,
 } from "@/db/checkin";
 
@@ -42,6 +43,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(await endMeeting(authorization.access.user, body));
     if (action === "work_end")
       return NextResponse.json(await endWork(authorization.access.user));
+    if (action === "save_early_checkin")
+      return NextResponse.json(await saveEarlyCheckin(authorization.access.user, body));
     if (action === "save_config")
       return NextResponse.json(
         await saveCheckinConfig(authorization.access.user, body),
