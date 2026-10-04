@@ -153,7 +153,15 @@ test('submission ownership, team filters, pagination and validation use authenti
   // HR grants open only the specified past dates, identity scope and deadline.
   const hr = {...unlinked,role:'hr'};
   const grantTime = new Date('2026-10-03T22:06:00Z');
+  const backfillTime = {};
+  new Function('exports',ts.transpileModule(readFileSync(new URL('../lib/work-submission-backfill-time.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(backfillTime);
+  for (const [clock,expected] of [['2026-10-04T02:59:59Z','2026-10-04T10:00'],['2026-10-04T03:00:00Z','2026-10-05T10:00'],['2026-10-31T07:00:00Z','2026-11-01T10:00'],['2026-12-31T07:00:00Z','2027-01-01T10:00']]) {
+    const deadline = backfillTime.defaultBackfillDeadline(new Date(clock));
+    assert.equal(deadline,expected);
+    assert.ok(Date.parse(deadline+':00+07:00')>Date.parse(clock));
+  }
   const grantInput = {action:'create',startDate:'2026-10-01',endDate:'2026-10-02',scope:'all',closesAt:'2026-10-04T10:00',reason:'เติมข้อมูลทดสอบ'};
+  await assert.rejects(api.saveWorkSubmissionBackfill(hr,{...grantInput,closesAt:'2026-10-04T05:00'},grantTime), /กรุณาตั้งเวลาปิดรับให้เป็นเวลาในอนาคต/);
   for(const role of ['employee','audit']) await assert.rejects(api.saveWorkSubmissionBackfill({...hr,role},grantInput,grantTime), /เฉพาะ HR/);
   await assert.rejects(api.getWorkSubmissionBackfillConfig({...hr,role:'employee'}),/เฉพาะ HR/);
   for(const bad of [{endDate:'2026-10-04'},{startDate:'2026-10-03',endDate:'2026-10-02'},{closesAt:'2026-10-04T05:00'},{closesAt:'2026-02-30T10:00'},{closesAt:'2026-10-04T25:00'},{scope:'team',team:'missing'},{scope:'employee',employeeId:'missing'},{reason:''}]) await assert.rejects(api.saveWorkSubmissionBackfill(hr,{...grantInput,...bad},grantTime));

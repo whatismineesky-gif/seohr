@@ -198,7 +198,7 @@ export async function saveWorkSubmissionBackfill(user: SystemUser, input: Record
   validateDate(deadline.slice(0,10));
   if (Number(deadline.slice(11,13)) > 23 || Number(deadline.slice(14,16)) > 59) throw new Error('เวลาปิดรับไม่ถูกต้อง');
   const closesAt = new Date(`${deadline}:00+07:00`).toISOString();
-  if (Date.parse(closesAt) <= now.getTime()) throw new Error('เวลาปิดรับต้องอยู่ในอนาคต');
+  if (Date.parse(closesAt) <= now.getTime()) throw new Error('กรุณาตั้งเวลาปิดรับให้เป็นเวลาในอนาคต');
   const scope = String(input.scope ?? 'all');
   if (!['all','team','employee'].includes(scope)) throw new Error('กรุณาเลือกผู้ที่ส่งย้อนหลังได้');
   const team = scope === 'team' ? requiredText(input.team, 'ทีม', 250) : '';
