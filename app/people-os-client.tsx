@@ -1,6 +1,5 @@
 "use client";
 
-import { DashboardMonthlyPanel } from "@/app/dashboard-monthly-panel";
 
 import { SystemAnnouncementsPanel } from "./system-announcements-panel";
 import { SystemAnnouncementBanner } from "@/components/system-announcement-banner";
@@ -32,7 +31,6 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
-  LayoutDashboard,
   Loader2,
   LogOut,
   Menu,
@@ -112,7 +110,6 @@ import { AttendancePanel } from "./attendance-panel";
 import { AdvancePanel, PayrollPanel } from "./payroll-panels";
 import { WarningPanel } from "./warning-panel";
 import { AccessPanel } from "./access-panel";
-import { WorkAuditOverview } from "./work-audit-panel";
 import { CheckinPanel } from "./checkin-panel";
 import { WorkSubmissionsPanel } from "./work-submissions-panel";
 
@@ -202,7 +199,6 @@ const currentThaiDate = new Intl.DateTimeFormat("th-TH", {
 
 const navItems = [
   { id: "announcements" as View, label: "ประกาศ / รอบอัปเดตระบบ", icon: Settings2 },
-  { id: "dashboard" as View, label: "ภาพรวม", icon: LayoutDashboard },
   { id: "employees" as View, label: "พนักงานทั้งหมด", icon: Users },
   { id: "members" as View, label: "MEMBER", icon: UserRoundCheck },
   { id: "checkin" as View, label: "เช็คชื่อ", icon: CalendarCheck },
@@ -331,266 +327,6 @@ function SummaryCard({
         <p className="mt-1 text-xs text-muted-foreground">{note}</p>
       </div>
     </section>
-  );
-}
-
-function Dashboard({
-  employees,
-  onNavigate,
-  canOpenAttendance,
-}: {
-  employees: Employee[];
-  onNavigate: (view: View) => void;
-  canOpenAttendance: boolean;
-}) {
-  const activeEmployees = employees.filter(
-    (employee) => employee.status === "ยังทำงานอยู่",
-  );
-  const notice = employees.filter(
-    (employee) => employee.status === "แจ้งลาออก",
-  ).length;
-  const pendingRemoval = employees.filter(
-    (employee) => employee.status === "กำลังรอคัดชื่อออก",
-  ).length;
-  const salaryReady = activeEmployees.filter(
-    (employee) => employee.hasSalary,
-  ).length;
-  const bankReady = activeEmployees.filter(
-    (employee) => employee.hasBank,
-  ).length;
-  const emailReady = activeEmployees.filter(
-    (employee) => employee.hasEmail,
-  ).length;
-  const monthlyPayroll = activeEmployees.reduce(
-    (sum, employee) => sum + (employee.salary ?? 0),
-    0,
-  );
-  const missingEmployeeId = employees.filter(
-    (employee) => !employee.id || /^TEMP[-_]/i.test(employee.id),
-  ).length;
-  const teamNames = Array.from(
-    new Set(activeEmployees.map((employee) => employee.team).filter(Boolean)),
-  );
-  const teams = Array.from(
-    new Set([
-      ...Array.from({ length: 16 }, (_, index) => `ทีม ${index + 1}`),
-      ...teamNames,
-    ]),
-  )
-    .map((name) => ({
-      name,
-      headcount: activeEmployees.filter((employee) => employee.team === name)
-        .length,
-    }))
-    .sort((left, right) =>
-      left.name.localeCompare(right.name, "th", { numeric: true }),
-    );
-  const maxTeam = Math.max(1, ...teams.map((team) => team.headcount));
-  const employment = activeEmployees.reduce<Record<string, number>>(
-    (counts, employee) => {
-      const label = employee.employment || "ไม่ระบุ";
-      counts[label] = (counts[label] ?? 0) + 1;
-      return counts;
-    },
-    {},
-  );
-  const probationPending = activeEmployees.filter(
-    (employee) => employee.probation === "ยังไม่ผ่าน",
-  ).length;
-  const dataChecks = [
-    {
-      label: "มีข้อมูลเงินเดือน",
-      value: salaryReady,
-      total: activeEmployees.length,
-    },
-    {
-      label: "มีข้อมูลบัญชีรับเงิน",
-      value: bankReady,
-      total: activeEmployees.length,
-    },
-    {
-      label: "มีอีเมลติดต่อ",
-      value: emailReady,
-      total: activeEmployees.length,
-    },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          label="พนักงานปัจจุบัน"
-          value={`${formatNumber.format(activeEmployees.length)} คน`}
-          note={`จากทั้งหมด ${formatNumber.format(employees.length)} ประวัติ`}
-          icon={Users}
-          tone="bg-indigo-50 text-indigo-700"
-        />
-        <SummaryCard
-          label="ทีมที่ดูแล"
-          value={`${teamNames.length} ทีม`}
-          note="คำนวณจากพนักงานที่ยังทำงานอยู่"
-          icon={Building2}
-          tone="bg-cyan-50 text-cyan-700"
-        />
-        <SummaryCard
-          label="แจ้งลาออก"
-          value={`${notice} รายการ`}
-          note={`${pendingRemoval} รายการรอคัดชื่อออก`}
-          icon={UserMinus}
-          tone="bg-amber-50 text-amber-700"
-        />
-        <SummaryCard
-          label="ฐานเงินเดือนพนักงานปัจจุบัน"
-          value={formatMoney.format(monthlyPayroll)}
-          note={`${salaryReady}/${activeEmployees.length} คนพร้อมคำนวณ`}
-          icon={Banknote}
-          tone="bg-emerald-50 text-emerald-700"
-        />
-      </div>
-
-      <DashboardMonthlyPanel onNavigate={(menu) => onNavigate(menu as View)} />
-
-      <WorkAuditOverview
-        canOpenAttendance={canOpenAttendance}
-        onOpenAttendance={() => onNavigate("attendance")}
-      />
-
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">HEADCOUNT BY TEAM</p>
-              <h2>จำนวนพนักงานแต่ละทีม</h2>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onNavigate("employees")}
-            >
-              ดูรายชื่อ <ChevronRight />
-            </Button>
-          </div>
-          <div className="team-chart" aria-label="กราฟจำนวนพนักงานแต่ละทีม">
-            {teams.map((team) => (
-              <div key={team.name} className="team-bar-row">
-                <span>{team.name.replace("ทีม ", "T")}</span>
-                <div className="team-bar-track">
-                  <div
-                    className="team-bar-fill"
-                    style={{
-                      width: `${Math.max((team.headcount / maxTeam) * 100, 9)}%`,
-                    }}
-                  />
-                </div>
-                <strong>{team.headcount}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">DATA READINESS</p>
-              <h2>ความพร้อมก่อนทำเงินเดือน</h2>
-            </div>
-            <ShieldCheck
-              className="size-5 text-emerald-600"
-              aria-hidden="true"
-            />
-          </div>
-          <div className="space-y-6 pt-1">
-            {dataChecks.map((item) => {
-              const percent =
-                item.total > 0 ? Math.round((item.value / item.total) * 100) : 0;
-              return (
-                <div key={item.label}>
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span>{item.label}</span>
-                    <strong>{percent}%</strong>
-                  </div>
-                  <Progress value={percent} className="h-2" />
-                  <p className="mt-1.5 text-xs text-muted-foreground">
-                    พร้อม {item.value} จาก {item.total} คน
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-          <button className="attention-card" onClick={() => onNavigate("data")}>
-            <AlertTriangle aria-hidden="true" />
-            <span>
-              <strong>
-                พบรหัสพนักงานชั่วคราว {missingEmployeeId} รายการ
-              </strong>
-              <small>ควรกำหนดรหัสจริงก่อนเชื่อมเงินเดือน</small>
-            </span>
-            <ChevronRight aria-hidden="true" />
-          </button>
-        </section>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">EMPLOYMENT MIX</p>
-              <h2>รูปแบบการจ้างงาน</h2>
-            </div>
-          </div>
-          <div className="employment-grid">
-            {Object.entries(employment).map(([label, count], index) => (
-              <div key={label} className="employment-item">
-                <span className={`legend-dot dot-${index + 1}`} />
-                <div>
-                  <p>{label}</p>
-                  <strong>{count} คน</strong>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <p className="section-kicker">WORK QUEUE</p>
-              <h2>รายการที่ HR ควรดำเนินการ</h2>
-            </div>
-          </div>
-          <div className="task-list">
-            <button onClick={() => onNavigate("payroll")}>
-              <span className="task-marker bg-rose-500" />
-              <span>
-                <strong>เติมข้อมูลเงินเดือนที่ขาด</strong>
-                <small>
-                  {activeEmployees.length - salaryReady} คน
-                </small>
-              </span>
-              <ChevronRight />
-            </button>
-            <button onClick={() => onNavigate("resignations")}>
-              <span className="task-marker bg-amber-500" />
-              <span>
-                <strong>ตรวจรายการ Offboarding</strong>
-                <small>
-                  {notice + pendingRemoval} รายการ
-                </small>
-              </span>
-              <ChevronRight />
-            </button>
-            <button onClick={() => onNavigate("members")}>
-              <span className="task-marker bg-indigo-500" />
-              <span>
-                <strong>ติดตามผู้ยังไม่ผ่านโปร</strong>
-                <small>{probationPending} คน</small>
-              </span>
-              <ChevronRight />
-            </button>
-          </div>
-        </section>
-      </div>
-    </div>
   );
 }
 
@@ -2166,7 +1902,7 @@ function AddEmployeeDialog({
 }
 
 export default function PeopleOSClient() {
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>("checkin");
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -2182,7 +1918,7 @@ export default function PeopleOSClient() {
   const [accessLoading, setAccessLoading] = useState(true);
   const currentTitle = viewTitles[view];
   const visibleNavItems = access
-    ? navItems.filter((item) => item.id === "announcements" ? access.currentUser.role === "hr" : access.permissions.includes(item.id) && (item.id !== "dashboard" || access.currentUser.role === "hr"))
+    ? navItems.filter((item) => item.id === "announcements" ? access.currentUser.role === "hr" : access.permissions.includes(item.id) && item.id !== "dashboard")
     : [];
 
   async function loadAccess() {
@@ -2206,9 +1942,9 @@ export default function PeopleOSClient() {
         permissions: result.permissions,
       });
       setView((current) =>
-        (result.permissions!.includes(current) || (current === "announcements" && result.currentUser!.role === "hr"))
+        (current !== "dashboard" && (result.permissions!.includes(current) || (current === "announcements" && result.currentUser!.role === "hr")))
           ? current
-          : result.currentUser!.role === "hr" ? "dashboard" : "checkin",
+          : "checkin",
       );
     } catch (error) {
       setAccess(null);
@@ -2223,7 +1959,6 @@ export default function PeopleOSClient() {
   useEffect(() => {
     if (!access) return;
     const needsEmployees = [
-      "dashboard",
       "employees",
       "members",
       "resignations",
@@ -2387,11 +2122,7 @@ export default function PeopleOSClient() {
               <h1>{currentTitle.title}</h1>
               <p>{currentTitle.description}</p>
             </div>
-            {view !== "dashboard" && access?.currentUser.role === "hr" && (
-              <Button variant="outline" onClick={() => setView("dashboard")}>
-                <LayoutDashboard /> กลับหน้าภาพรวม
-              </Button>
-            )}
+
           </div>
 
           {accessLoading && (
@@ -2414,15 +2145,6 @@ export default function PeopleOSClient() {
             </section>
           )}
           {!accessLoading && access?.currentUser.role === "hr" && view === "announcements" && <SystemAnnouncementsPanel />}
-          {!accessLoading && access?.currentUser.role === "hr" && view === "dashboard" && (
-            <Dashboard
-              employees={employees}
-              canOpenAttendance={access.permissions.includes("attendance")}
-              onNavigate={(next) =>
-                access.permissions.includes(next) && setView(next)
-              }
-            />
-          )}
           {!accessLoading && access && view === "employees" && (
             <Directory
               employees={employees}
