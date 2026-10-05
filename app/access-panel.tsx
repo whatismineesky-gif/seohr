@@ -58,7 +58,6 @@ const roleLabels: Record<Role, string> = {
   employee: "พนักงาน",
 };
 const menus = [
-  ["dashboard", "ภาพรวม"],
   ["employees", "พนักงานทั้งหมด"],
   ["members", "MEMBER"],
   ["checkin", "เช็คชื่อ"],
@@ -131,7 +130,6 @@ export function AccessPanel({
 
   function togglePermission(menuId: string) {
     if (
-      menuId === "dashboard" ||
       menuId === "checkin" ||
       (form.role === "hr" && menuId === "access")
     )
@@ -409,25 +407,24 @@ export function AccessPanel({
             </div>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {menus.map(([id, label]) => {
-                const selected = id === "dashboard" ? form.role === "hr" : form.permissions.includes(id);
+                const selected = form.permissions.includes(id);
                 return (
                   <button
                     key={id}
                     type="button"
                     onClick={() => togglePermission(id)}
-                    disabled={id === "dashboard" || id === "checkin"}
+                    disabled={id === "checkin"}
                     title={
-                      id === "dashboard" ? "หน้าภาพรวมเปิดให้เฉพาะ HR"
-                        : id === "checkin" ? "ผู้ใช้ทุกคนเข้าถึงเมนูนี้ได้"
+                      id === "checkin" ? "ผู้ใช้ทุกคนเข้าถึงเมนูนี้ได้"
                         : undefined
                     }
-                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${selected ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-900" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"} ${id === "dashboard" || id === "checkin" ? "cursor-not-allowed opacity-80" : ""}`}
+                    className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition ${selected ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-900" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"} ${id === "checkin" ? "cursor-not-allowed opacity-80" : ""}`}
                   >
                     <span>
                       {label}
-                      {(id === "dashboard" || id === "checkin") && (
+                      {(id === "checkin") && (
                         <span className="ml-2 text-xs font-normal text-indigo-600">
-                          {id === "dashboard" ? "เฉพาะ HR" : "สิทธิ์พื้นฐาน"}
+                          สิทธิ์พื้นฐาน
                         </span>
                       )}
                     </span>
