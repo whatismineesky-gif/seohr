@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const types = [{ value: 'new', label: 'เว็บใหม่' }, { value: '301', label: 'เว็บ 301' }, { value: '301_new', label: 'เว็บ 301 ขึ้นใหม่' }];
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', date: defaultSubmissionDate(), parentWebsite: '', type: '' });
+const newEntry = (rowId: string) => ({ rowId, keyword: '', website: '', parentWebsite: '', type: '' });
 type Entry = ReturnType<typeof newEntry>;
 type Row = { id: number; submittedAt: string; isBackfill: boolean; employeeId: string; authorName: string; team: string; keyword: string; website: string; date: string; parentWebsite: string; type: string; canEdit: boolean };
 type Data = { backfillGrants: { id: number; startDate: string; endDate: string; closesAt: string }[]; items: Row[]; total: number; pageSize: number; teams: { value: string; label: string }[]; currentUser: { name: string; team: string; role: string }; clockOffsetMs: number; window: { canSubmit: boolean; closesAt: string; serverNow: string } };
@@ -34,6 +34,7 @@ function Dropdown({ id, label, value, options, disabled, required = false, onCha
 
 export function WorkSubmissionsPanel() {
   const [tab, setTab] = useState('create');
+  const [submissionDate, setSubmissionDate] = useState(defaultSubmissionDate);
   const [entries, setEntries] = useState<Entry[]>([newEntry('1')]);
   const nextId = useRef(2);
   const [scope, setScope] = useState('mine');
@@ -85,11 +86,11 @@ export function WorkSubmissionsPanel() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit || saving) return;
-    const invalid = entries.findIndex(entry => !entry.keyword.trim() || !entry.website.trim() || !entry.date.trim() || !entry.parentWebsite.trim() || !types.some(type=>type.value===entry.type));
+    const invalid = entries.findIndex(entry => !entry.keyword.trim() || !entry.website.trim() || !submissionDate.trim() || !entry.parentWebsite.trim() || !types.some(type=>type.value===entry.type));
     if (invalid >= 0) { toast.error(`กรุณากรอกทุกช่องและเลือกประเภทในรายการที่ ${invalid + 1}`); return; }
     setSaving(true);
     try {
-      const response = await fetch('/api/work-submissions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: entries }) });
+      const response = await fetch('/api/work-submissions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: entries.map(entry => ({ ...entry, date: submissionDate })) }) });
       const result = await response.json() as {error?:string;count?:number};
       if (!response.ok) throw new Error(result.error || 'บันทึกการส่งงานไม่สำเร็จ');
       toast.success(`คุณได้ทำการส่งงานแล้ว จำนวน ${result.count} เว็บ`);
@@ -156,14 +157,14 @@ export function WorkSubmissionsPanel() {
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / 100));
   const serverTime = new Date(now + (data?.clockOffsetMs ?? 0));
   const dateOpen = (date: string) => Boolean(data && (workSubmissionWindow(date, serverTime).canSubmit || data.backfillGrants.some(grant => date >= grant.startDate && date <= grant.endDate && serverTime.getTime() < Date.parse(grant.closesAt))));
-  const canSubmit = entries.every(entry => dateOpen(entry.date));
+  const canSubmit = Boolean(submissionDate && dateOpen(submissionDate));
   const originalEditDate = data?.items.find(row => row.id === editTarget?.id)?.date;
   const canSaveEdit = Boolean(editTarget && originalEditDate && dateOpen(originalEditDate) && dateOpen(editTarget.date));
   const formatTime = (value: string) => value ? new Date(value).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }) : 'กรุณาระบุวันที่ให้ถูกต้อง';
   return <Tabs value={tab} onValueChange={setTab}>
     <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger>{data?.currentUser.role === 'hr' && <><TabsTrigger value="backfill">เปิดส่งงานย้อนหลัง</TabsTrigger><TabsTrigger value="api"><KeyRound /> API / เชื่อมระบบ</TabsTrigger></>}</TabsList>
     <TabsContent value="create">
-      <section className="panel">
+      <section className="panel min-w-0">
         <div className="panel-heading mb-5"><div><p className="section-kicker">NEW WORK SUBMISSION</p><h2>บันทึกส่งงานใหม่</h2>
           <p className="mt-2 text-sm text-muted-foreground">ผู้ส่ง: {data?.currentUser.name ?? 'บัญชีที่ล็อกอิน'} · {data?.currentUser.team || 'ยังไม่ระบุทีม'}</p>
         </div></div>
@@ -171,20 +172,23 @@ export function WorkSubmissionsPanel() {
         {data?.backfillGrants.map(grant => <p key={grant.id} className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">HR เปิดให้ส่งและแก้ไขย้อนหลัง วันที่ {grant.startDate} ถึง {grant.endDate} · ปิดรับ {formatTime(grant.closesAt)}</p>)}
         {error && <p role="alert" className="mb-4 text-sm text-rose-600">{error}</p>}
         <form onSubmit={submit} className="space-y-4">
-          {entries.map((entry, index) => <fieldset key={entry.rowId} disabled={saving} className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+            <label className="grid max-w-xs gap-2 text-sm font-medium">วันที่ส่งงาน<Input required type="date" min="1900-01-01" value={submissionDate} disabled={saving} onChange={e => setSubmissionDate(e.target.value)} /></label>
+            <p className="mt-2 text-xs text-muted-foreground">วันที่นี้ใช้กับทุกรายการด้านล่าง</p>
+            <p className={`mt-2 text-sm ${dateOpen(submissionDate) ? 'text-green-700' : 'text-amber-700'}`} role="status">{(() => { const period = workSubmissionWindow(submissionDate, serverTime); const grant = data?.backfillGrants.find(item => submissionDate >= item.startDate && submissionDate <= item.endDate && serverTime.getTime() < Date.parse(item.closesAt)); if (!period.canSubmit && grant) return `เปิดรับส่งย้อนหลัง ถึงก่อน ${formatTime(grant.closesAt)} เวลาไทย`; return `${dateOpen(submissionDate) ? 'เปิดรับส่งงาน' : 'อยู่นอกช่วงรับส่งงาน'} · ${formatTime(period.opensAt)} ถึงก่อน ${formatTime(period.closesAt)} เวลาไทย`; })()}</p>
+          </div>
+          {entries.map((entry, index) => <fieldset key={entry.rowId} disabled={saving || !submissionDate} className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
             <legend className="px-2 text-sm font-semibold text-indigo-900">รายการที่ {index + 1}</legend>
             <div className="mb-3 flex justify-end">{entries.length > 1 && <Button type="button" size="sm" variant="ghost" className="text-rose-600" aria-label={`ลบรายการที่ ${index + 1}`} onClick={() => setEntries(current => current.filter(item => item.rowId !== entry.rowId))}><Trash2 /> ลบรายการ</Button>}</div>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="overflow-x-auto pb-2"><div className="grid min-w-[760px] grid-cols-4 gap-4">
               <label className="grid gap-2 text-sm font-medium">คีย์<Input required maxLength={250} value={entry.keyword} onChange={e => update(entry.rowId, 'keyword', e.target.value)} /></label>
               <label className="grid gap-2 text-sm font-medium">เว็บ<Input required maxLength={500} placeholder="example.com" value={entry.website} onChange={e => update(entry.rowId, 'website', e.target.value)} /></label>
-              <label className="grid gap-2 text-sm font-medium">วันที่<Input required type="date" min="1900-01-01" value={entry.date} onChange={e => update(entry.rowId, 'date', e.target.value)} /></label>
               <label className="grid gap-2 text-sm font-medium">เว็บแม่<Input required maxLength={500} placeholder="parent.com" value={entry.parentWebsite} onChange={e => update(entry.rowId, 'parentWebsite', e.target.value)} /></label>
-              <Dropdown id={`submission-type-${entry.rowId}`} label="ประเภท" required value={entry.type} options={types} disabled={saving} onChange={value => update(entry.rowId, 'type', value)} />
-            </div>
-            <p className={`mt-3 text-sm ${dateOpen(entry.date) ? 'text-green-700' : 'text-amber-700'}`} role="status">{(() => { const period = workSubmissionWindow(entry.date, serverTime); const grant = data?.backfillGrants.find(item => entry.date >= item.startDate && entry.date <= item.endDate && serverTime.getTime() < Date.parse(item.closesAt)); if (!period.canSubmit && grant) return `เปิดรับส่งย้อนหลัง ถึงก่อน ${formatTime(grant.closesAt)} เวลาไทย`; return `${dateOpen(entry.date) ? 'เปิดรับส่งงาน' : 'อยู่นอกช่วงรับส่งงาน'} · ${formatTime(period.opensAt)} ถึงก่อน ${formatTime(period.closesAt)} เวลาไทย`; })()}</p>
+              <Dropdown id={`submission-type-${entry.rowId}`} label="ประเภท" required value={entry.type} options={types} disabled={saving || !submissionDate} onChange={value => update(entry.rowId, 'type', value)} />
+            </div></div>
           </fieldset>)}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Button type="button" variant="outline" className="border-indigo-200 text-indigo-700" disabled={saving || entries.length >= 100} onClick={() => setEntries(current => [...current, newEntry(String(nextId.current++))])}><Plus /> เพิ่มรายการ</Button>
+            <Button type="button" variant="outline" className="border-indigo-200 text-indigo-700" disabled={saving || !submissionDate || entries.length >= 100} onClick={() => setEntries(current => [...current, newEntry(String(nextId.current++))])}><Plus /> เพิ่มรายการ</Button>
             <Button type="submit" disabled={saving || !canSubmit}>{saving ? <Loader2 className="animate-spin" /> : <Save />} บันทึกทั้งหมด ({entries.length} เว็บ)</Button>
           </div>
         </form>
