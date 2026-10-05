@@ -1,5 +1,7 @@
 "use client";
 
+import { CheckinReviewPanel } from "./checkin-review-panel";
+
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -181,6 +183,7 @@ export function CheckinPanel() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TabsList>
           <TabsTrigger value="checkin"><CalendarCheck /> เช็คชื่อ</TabsTrigger>
+          {isHr && <TabsTrigger value="review"><CalendarCheck /> ตรวจเช็คชื่อ / HR</TabsTrigger>}
           {isHr && <TabsTrigger value="config"><Settings2 /> Config</TabsTrigger>}
         </TabsList>
         <Button variant="outline" onClick={() => void load()} disabled={loading}>
@@ -271,6 +274,8 @@ export function CheckinPanel() {
           </TableBody></Table></div>
         </section>
       </TabsContent>
+
+      {isHr && <TabsContent value="review"><CheckinReviewPanel /></TabsContent>}
 
       {isHr && <TabsContent value="config" className="space-y-5">
         <section className="panel">

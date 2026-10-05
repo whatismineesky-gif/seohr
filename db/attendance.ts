@@ -645,8 +645,8 @@ export async function createAttendanceRecord(
   } else if (user.role === "audit") {
     if (!new Set(["absence", "admin", "true"]).has(recordType))
       throw new Error("Audit บันทึกได้เฉพาะหยุดงาน แอดมิน หรือทรู");
-  } else if (!new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)) {
-    throw new Error("HR บันทึกได้เฉพาะมาสาย หยุดงาน ลาประชุม แอดมิน หรือทรู");
+  } else if (!new Set(["late", "absence", "meeting_leave", "admin", "true", "working"]).has(recordType)) {
+    throw new Error("ประเภทการลงเวลาไม่ถูกต้อง");
   }
 
   if (!employeeId) throw new Error("กรุณาเลือกพนักงาน");
@@ -724,7 +724,7 @@ export async function updateAttendanceRecord(
     throw new Error("Audit บันทึกได้เฉพาะหยุดงาน แอดมิน หรือทรู");
   if (
     user.role === "hr" &&
-    !new Set(["late", "absence", "meeting_leave", "admin", "true"]).has(recordType)
+    !new Set(["late", "absence", "meeting_leave", "admin", "true", "working"]).has(recordType)
   )
     throw new Error("ประเภทการลงเวลาไม่ถูกต้อง");
   const database = getD1();

@@ -247,6 +247,15 @@ test('HR can create and edit admin/true records with audit history, without new 
   await assert.rejects(attendance.createAttendanceRecord(employee, { ...input, recordType: 'late' }), /พนักงานบันทึกได้เฉพาะ/);
   await assert.rejects(attendance.createAttendanceRecord(audit, { ...input, recordType: 'meeting_leave' }), /Audit/);
   assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
+  const late = await attendance.createAttendanceRecord(hr, { ...input, recordType: 'late', reason: 'missing check-in' });
+  assert.equal((await attendance.getAttendancePayrollImpact('B', '2026-10')).late, 1);
+  await attendance.updateAttendanceRecord(hr, { ...input, id: late.id, recordType: 'working', reason: 'HR confirmed emergency' });
+  assert.deepEqual(await attendance.getAttendancePayrollImpact('B', '2026-10'), before);
+  const correction = f.sqlite.prepare('SELECT * FROM hr_attendance_audit_logs WHERE attendance_record_id = ? ORDER BY id DESC LIMIT 1').get(late.id);
+  assert.equal(correction.previous_record_type, 'late');
+  assert.equal(correction.new_record_type, 'working');
+  await assert.rejects(attendance.createAttendanceRecord(employee, { ...input, recordType: 'working' }), /พนักงานบันทึกได้เฉพาะ/);
+  await assert.rejects(attendance.createAttendanceRecord(audit, { ...input, recordType: 'working' }), /Audit/);
   f.sqlite.close();
 });
 
