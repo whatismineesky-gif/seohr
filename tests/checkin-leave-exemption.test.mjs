@@ -19,8 +19,8 @@ function fixture() {
 const user={userId:'a',email:'a@test',employeeId:'A',displayName:'Alice',role:'employee'};
 const afterCutoff=()=>new Date('2026-10-04T07:00:00Z'); // 14:00 Bangkok
 
-test('absence or meeting leave on the check-in date suppress late flag, attendance and payroll sync',async()=>{
- for(const type of ['absence','meeting_leave']){
+test('absence, meeting leave or HR confirmed work on the check-in date suppress late flag, attendance and payroll sync',async()=>{
+ for(const type of ['absence','meeting_leave','working']){
   const f=fixture(); f.sqlite.prepare('INSERT INTO hr_attendance_records(employee_id,record_date,record_type,reason) VALUES(?,?,?,?)').run('A','2026-10-04',type,'planned');
   const info=await f.getCheckinData(user,afterCutoff);
   assert.equal(info.availability.meetingLateExempt,true);assert.equal(info.availability.meetingWouldBeLate,false);assert.equal(info.availability.meetingCanStart,true);

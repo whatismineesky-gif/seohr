@@ -76,7 +76,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { WorkAuditPanel } from "./work-audit-panel";
 
 type Role = "employee" | "hr" | "audit";
-type EventType = "absence" | "meeting_leave" | "late" | "admin" | "true";
+type EventType = "absence" | "meeting_leave" | "late" | "admin" | "true" | "working";
 type ActionType = "lose_bonus" | "deduct_money" | "force_leave" | "limit";
 
 type AttendanceData = {
@@ -185,6 +185,7 @@ type Rule = {
 };
 
 const eventLabels: Record<EventType, string> = {
+  working: "ทำงาน (HR ยืนยัน)",
   absence: "หยุดงาน",
   meeting_leave: "ลาประชุม",
   late: "มาสาย",
@@ -365,7 +366,7 @@ function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved: () => void }) {
               setDraft({ ...draft, eventType: event.target.value as EventType })
             }
           >
-            {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true").map(([value, label]) => (
+            {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true" && value !== "working").map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -580,7 +581,7 @@ export function AttendancePanel() {
     if (data?.currentUser.role === "employee")
       return ["absence", "meeting_leave", "admin", "true"];
     if (data?.currentUser.role === "audit") return ["absence", "admin", "true"];
-    return ["late", "absence", "meeting_leave", "admin", "true"];
+    return ["late", "absence", "meeting_leave", "admin", "true", "working"];
   }, [data?.currentUser.role]);
 
   const effectiveRecordType = allowedTypes.includes(recordType)
@@ -1626,7 +1627,7 @@ export function AttendancePanel() {
                     })
                   }
                 >
-                  {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true").map(([value, label]) => (
+                  {Object.entries(eventLabels).filter(([value]) => value !== "admin" && value !== "true" && value !== "working").map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>

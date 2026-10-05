@@ -1,5 +1,7 @@
+import { reviewDate, dailyCheckinStatus } from "../lib/checkin-review";
+import { isoEmployeeDate } from "../lib/dashboard-month";
 import { getD1 } from "./index";
-import { syncAttendanceToPayroll, type SystemUser } from "./attendance";
+import { createAttendanceRecord, updateAttendanceRecord, syncAttendanceToPayroll, type SystemUser } from "./attendance";
 
 type CheckinConfig = {
   systemEnabled: boolean;
@@ -144,7 +146,7 @@ async function ensureSession(user: SystemUser, employeeId: string, workDate: str
 
 async function meetingLateExempt(employeeId: string, workDate: string) {
   const record = await getD1().prepare(`SELECT id FROM hr_attendance_records
-    WHERE employee_id = ? AND record_date = ? AND record_type IN ('absence', 'meeting_leave') LIMIT 1`)
+    WHERE employee_id = ? AND record_date = ? AND record_type IN ('absence', 'meeting_leave', 'working') LIMIT 1`)
     .bind(employeeId, workDate).first<{ id: number }>();
   return Boolean(record);
 }
@@ -385,4 +387,45 @@ export async function saveCheckinConfig(
     user.email,
   ).run();
   return { ok: true };
+}
+
+
+export async function getDailyCheckinReview(user: SystemUser, value: unknown, now = new Date()) {
+  if (user.role !== "hr") throw new Error("เฉพาะ HR เท่านั้นที่ดูข้อมูลเช็คชื่อทั้งหมดได้");
+  const { date } = reviewDate(value, now);
+  const config = await getConfig();
+  const db = getD1();
+  const employees = (await db.prepare("SELECT id,nickname,team,position,status,start_date,end_date FROM hr_employees ORDER BY team,nickname,id").all<Record<string, unknown>>()).results;
+  const checkins = (await db.prepare("SELECT * FROM hr_employee_checkins WHERE work_date = ?").bind(date).all<Record<string, unknown>>()).results;
+  const attendance = (await db.prepare("SELECT id,employee_id,record_type,reason,source_type,recorder_email,updated_at FROM hr_attendance_records WHERE record_date = ? ORDER BY id").bind(date).all<Record<string, unknown>>()).results;
+  const items = employees.filter(e => (!e.start_date || isoEmployeeDate(e.start_date) <= date) && (e.status !== "ลาออก" || Boolean(e.end_date && isoEmployeeDate(e.end_date) >= date))).map(e => {
+    const session = checkins.find(c => c.employee_id === e.id);
+    const records = attendance.filter(r => r.employee_id === e.id);
+    return { employeeId: String(e.id), nickname: String(e.nickname), team: String(e.team ?? ""), meetingStartedAt: session?.meeting_started_at ? String(session.meeting_started_at) : null, meetingEndedAt: session?.meeting_ended_at ? String(session.meeting_ended_at) : null, workEndedAt: session?.work_ended_at ? String(session.work_ended_at) : null, status: dailyCheckinStatus(date, config, session, records, now), records: records.map(r => ({ id: Number(r.id), type: String(r.record_type), reason: String(r.reason), source: String(r.source_type), recorderEmail: String(r.recorder_email) })) };
+  });
+  return { date, serverNow: now.toISOString(), lateAfter: config.meetingLateAfter, systemEnabled: config.systemEnabled, items };
+}
+
+export async function saveDailyCheckinReview(user: SystemUser, input: Record<string, unknown>) {
+  if (user.role !== "hr") throw new Error("เฉพาะ HR เท่านั้นที่บันทึกสถานะเช็คชื่อได้");
+  if (typeof input.recordDate !== "string" || !input.recordDate.trim()) throw new Error("กรุณาเลือกวันที่ก่อนบันทึก");
+  const { date } = reviewDate(input.recordDate);
+  const employeeId = String(input.employeeId ?? "").trim();
+  const recordType = String(input.recordType ?? "");
+  if (!["working", "late", "absence", "meeting_leave", "admin", "true"].includes(recordType)) throw new Error("กรุณาเลือกสถานะที่ถูกต้อง");
+  const db = getD1();
+  const employee = await db.prepare("SELECT id,start_date,end_date,status FROM hr_employees WHERE id = ?").bind(employeeId).first<Record<string, unknown>>();
+  if (!employee || (employee.start_date && isoEmployeeDate(employee.start_date) > date) || (employee.status === "ลาออก" && (!employee.end_date || isoEmployeeDate(employee.end_date) < date))) throw new Error("พนักงานไม่ได้ทำงานในวันที่เลือก");
+  const id = Number(input.id ?? 0);
+  if (!Number.isInteger(id) || id < 0) throw new Error("รายการลงเวลาไม่ถูกต้อง");
+  if (id) {
+    const record = await db.prepare("SELECT employee_id,record_date,source_type FROM hr_attendance_records WHERE id = ?").bind(id).first<Record<string, unknown>>();
+    if (!record || record.employee_id !== employeeId || record.record_date !== date || record.source_type === "work_audit") throw new Error("ไม่มีสิทธิ์แก้ไขรายการลงเวลานี้จากหน้าเช็คชื่อ");
+  }
+  const duplicate = await db.prepare("SELECT id FROM hr_attendance_records WHERE employee_id = ? AND record_date = ? AND record_type = ?").bind(employeeId,date,recordType).first<{id:number}>();
+  if (duplicate && Number(duplicate.id) !== id) throw new Error("มีสถานะนี้อยู่แล้ว กรุณาเลือกรายการเดิมเพื่อแก้ไข");
+  const reason = String(input.reason ?? "").trim();
+  if (!reason || reason.length > 2000) throw new Error("กรุณาระบุเหตุผล ไม่เกิน 2,000 ตัวอักษร");
+  const values = { employeeId, recordDate: date, recordType, reason, id };
+  return id ? updateAttendanceRecord(user, values) : createAttendanceRecord(user, values);
 }
