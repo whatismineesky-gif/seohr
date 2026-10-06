@@ -19,7 +19,8 @@ async function activeBackfillGrants(user: SystemUser, now: Date) {
   return result.results;
 }
 
-async function assertOpenDates(user: SystemUser, dates: string[], now: Date) {
+async function assertOpenDates(user: SystemUser, dates: string[], now: Date, allowEditor = false) {
+  if (allowEditor && await editorSnapshot(user) !== null) return dates.map(() => null);
   const grants = dates.some(date => !submissionWindow(now, date).canSubmit) ? await activeBackfillGrants(user, now) : [];
   return dates.map(date => {
     if (submissionWindow(now, date).canSubmit) return null;
@@ -65,11 +66,11 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
   if (!Array.isArray(entries) || entries.length < 1 || entries.length > 100) throw new Error('กรุณาส่งงานครั้งละ 1–100 รายการ');
   const validated = entries.map(validateSubmission);
   const startedAt = clock();
-  await assertOpenDates(user, validated.map(item => item.date), startedAt);
+  await assertOpenDates(user, validated.map(item => item.date), startedAt, true);
   const employee = await employeeInfo(user);
   const db = getD1();
   const now = clock();
-  const grantIds = await assertOpenDates(user, validated.map(item => item.date), now);
+  const grantIds = await assertOpenDates(user, validated.map(item => item.date), now, true);
   const statements = validated.map(({ keyword, website, parent, date, type }, index) => db.prepare(`INSERT INTO hr_work_submissions
     (keyword, website, work_date, parent_website, submission_type, employee_id, team, author_email, author_name, updated_at, backfill_grant_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`).bind(keyword, website, date, parent, type,
@@ -113,16 +114,18 @@ function windowBindings(date: string, grantId: number | null, now: Date) {
 
 export async function editWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
   const fields = validateSubmission(input);
-  await assertOpenDates(user, [fields.date], clock());
+  await assertOpenDates(user, [fields.date], clock(), true);
   const id = Number(input.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
   const { row, permission } = await mutationContext(user, id);
   const now = clock();
-  const grants = await assertOpenDates(user, [row.work_date, fields.date], now);
+  const grants = await assertOpenDates(user, [row.work_date, fields.date], now, true);
   const result = await getD1().prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND ${mutationWindow} AND ${mutationWindow}`)
+    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND (EXISTS (
+      SELECT 1 FROM hr_system_users u WHERE u.email = ? COLLATE NOCASE AND u.menu_permissions = ?)
+      OR (${mutationWindow} AND ${mutationWindow}))`)
     .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, row.work_date,
-      user.email, user.email, permission, ...windowBindings(row.work_date, grants[0], now), ...windowBindings(fields.date, grants[1], now)).run();
+      user.email, user.email, permission, user.email, permission, ...windowBindings(row.work_date, grants[0], now), ...windowBindings(fields.date, grants[1], now)).run();
   if (Number(result.meta.changes) !== 1) throw new Error('รายการหรือสิทธิ์มีการเปลี่ยนแปลง หรือหมดเวลาแล้ว กรุณาโหลดข้อมูลใหม่');
   return { id };
 }
@@ -202,7 +205,7 @@ export async function getWorkSubmissions(user: SystemUser, params: URLSearchPara
     backfillGrants: backfillGrants.map(item => ({ id: Number(item.id), startDate: item.start_date, endDate: item.end_date, closesAt: item.closes_at })),
     teams: teams.results.map(row => ({ value: row.team || '__unassigned__', label: row.team || 'ยังไม่ระบุทีม' }))
       .sort((a, b) => a.label.localeCompare(b.label, 'th', { numeric: true })),
-    currentUser: { role: user.role, name: employee?.nickname || user.displayName || user.email, team: employee?.team ?? '' } };
+    currentUser: { canWriteAnytime: editorPermission !== null, role: user.role, name: employee?.nickname || user.displayName || user.email, team: employee?.team ?? '' } };
 }
 
 export async function workSubmissionReport(user: SystemUser, params: URLSearchParams) {
@@ -211,7 +214,7 @@ export async function workSubmissionReport(user: SystemUser, params: URLSearchPa
   rows.results.sort((a, b) => String(a.team).localeCompare(String(b.team), 'th', { numeric: true })
     || String(a.author_name).localeCompare(String(b.author_name), 'th', { numeric: true })
     || String(a.work_date).localeCompare(String(b.work_date)) || Number(a.id) - Number(b.id));
-  const labels: Record<string, string> = { new: 'เว็บใหม่', '301': 'เว็บ 301', '301_new': 'เว็บ 301 ขึ้นใหม่' };
+  const labels: Record<string, string> = { new: 'เว็บใหม่', '301': 'เว็บ 301 ยกธีม', '301_new': 'เว็บ 301 ขึ้นใหม่' };
   return [['ทีม', 'ชื่อ', 'คีย์', 'เว็บ', 'วันที่', 'เว็บแม่', 'ประเภท'], ...rows.results.map(row =>
     [String(row.team || 'ยังไม่ระบุทีม'), String(row.author_name), String(row.keyword), String(row.website), String(row.work_date), String(row.parent_website), labels[String(row.submission_type)]])];
 }

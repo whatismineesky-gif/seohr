@@ -21,7 +21,7 @@ export async function getMonthlyDashboard(user: SystemUser, permissions: MenuId[
   if (permissions.includes("submissions")) {
     const submissions = await rows(`SELECT submission_type, team FROM hr_work_submissions WHERE work_date >= ? AND work_date < ?${own ? " AND author_email = ? COLLATE NOCASE" : ""}`, range.start, range.end, ...(own ? [user.email] : []));
     const teams = new Map<string, number>(); submissions.forEach(r => teams.set(String(r.team || "ไม่ระบุทีม"), (teams.get(String(r.team || "ไม่ระบุทีม")) ?? 0) + 1));
-    sections.push({ title: "การส่งงานเว็บ", menu: "submissions", recorded: submissions.length, metrics: [metric("รวมส่งงาน", submissions.length, "เว็บ"), ...["new", "301", "301_new"].map((type, i) => metric(["เว็บใหม่", "เว็บ 301", "เว็บ 301 ขึ้นใหม่"][i], submissions.filter(r => r.submission_type === type).length, "เว็บ"))], teams: Array.from(teams, ([name, count]) => ({ name, count })).sort((a,b) => a.name.localeCompare(b.name,"th",{numeric:true})) });
+    sections.push({ title: "การส่งงานเว็บ", menu: "submissions", recorded: submissions.length, metrics: [metric("รวมส่งงาน", submissions.length, "เว็บ"), ...["new", "301", "301_new"].map((type, i) => metric(["เว็บใหม่", "เว็บ 301 ยกธีม", "เว็บ 301 ขึ้นใหม่"][i], submissions.filter(r => r.submission_type === type).length, "เว็บ"))], teams: Array.from(teams, ([name, count]) => ({ name, count })).sort((a,b) => a.name.localeCompare(b.name,"th",{numeric:true})) });
   }
   if (permissions.includes("attendance")) {
     const [attendance, reviews, config, rules] = await Promise.all([

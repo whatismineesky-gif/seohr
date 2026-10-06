@@ -39,7 +39,7 @@ test('integration reads filter both dates, Bangkok midnight, team scope, paging 
  insert.run('D','d.com','2026-10-03','parent.com','new','A','ทีม 1','secret-a@test','เอ','2026-10-03 17:00:00');
  const all={scope:'all',team:''},team={scope:'team',team:'ทีม 1'};
  const get=(key,query)=>api.getIntegrationSubmissions(key,new URLSearchParams(query));
- let result=await get(all,'date=2026-10-03');assert.deepEqual(result.items.map(r=>r.id),[1,2,4]);assert.equal(result.total,3);assert.equal(result.items[0].submittedAt,'2026-10-02T16:59:59.000Z');assert.equal(result.items[0].updatedAt,result.items[0].submittedAt);assert.equal(result.items[0].employeeId,'A');assert.equal(result.items[0].name,'เอ');assert.equal(result.items[1].typeLabel,'เว็บ 301');assert.equal(JSON.stringify(result).includes('secret-'),false);
+ let result=await get(all,'date=2026-10-03');assert.deepEqual(result.items.map(r=>r.id),[1,2,4]);assert.equal(result.total,3);assert.equal(result.items[0].submittedAt,'2026-10-02T16:59:59.000Z');assert.equal(result.items[0].updatedAt,result.items[0].submittedAt);assert.equal(result.items[0].employeeId,'A');assert.equal(result.items[0].name,'เอ');assert.equal(result.items[1].typeLabel,'เว็บ 301 ยกธีม');assert.equal(JSON.stringify(result).includes('secret-'),false);
  result=await get(all,'submittedDate=2026-10-03');assert.deepEqual(result.items.map(r=>r.id),[2,3]);assert.equal(result.timezone,'Asia/Bangkok');
  result=await get(all,'date=2026-10-03&submittedDate=2026-10-03');assert.deepEqual(result.items.map(r=>r.id),[2]);
  result=await get(team,'submittedDate=2026-10-03');assert.deepEqual(result.items.map(r=>r.id),[3]);
