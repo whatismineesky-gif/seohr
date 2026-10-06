@@ -134,12 +134,14 @@ export async function deleteWorkSubmission(user: SystemUser, input: Record<strin
   const id = Number(input?.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
   const { row, permission } = await mutationContext(user, id);
-  await assertOpenDates(user, [row.work_date], clock());
+  await assertOpenDates(user, [row.work_date], clock(), true);
   const now = clock();
-  const [grantId] = await assertOpenDates(user, [row.work_date], now);
+  const [grantId] = await assertOpenDates(user, [row.work_date], now, true);
   const result = await getD1().prepare(`DELETE FROM hr_work_submissions
-    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND ${mutationWindow}`)
-    .bind(id, row.work_date, user.email, user.email, permission, ...windowBindings(row.work_date, grantId, now)).run();
+    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND (EXISTS (
+      SELECT 1 FROM hr_system_users u WHERE u.email = ? COLLATE NOCASE AND u.menu_permissions = ?)
+      OR ${mutationWindow})`)
+    .bind(id, row.work_date, user.email, user.email, permission, user.email, permission, ...windowBindings(row.work_date, grantId, now)).run();
   if (Number(result.meta.changes) !== 1) throw new Error('รายการหรือสิทธิ์มีการเปลี่ยนแปลง หรือหมดเวลาลบแล้ว กรุณาโหลดข้อมูลใหม่');
   return { id };
 }

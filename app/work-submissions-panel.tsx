@@ -139,7 +139,7 @@ export function WorkSubmissionsPanel() {
   }
 
   async function confirmDelete() {
-    if (!deleteTarget || !dateOpen(deleteTarget.date) || saving) return;
+    if (!deleteTarget || !writeDateOpen(deleteTarget.date) || saving) return;
     setSaving(true);
     try {
       const response = await fetch('/api/work-submissions', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: deleteTarget.id }) });
@@ -171,7 +171,7 @@ export function WorkSubmissionsPanel() {
         <div className="panel-heading mb-5"><div><p className="section-kicker">NEW WORK SUBMISSION</p><h2>บันทึกส่งงานใหม่</h2>
           <p className="mt-2 text-sm text-muted-foreground">ผู้ส่ง: {data?.currentUser.name ?? 'บัญชีที่ล็อกอิน'} · {data?.currentUser.team || 'ยังไม่ระบุทีม'}</p>
         </div></div>
-        <p className="mb-5 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900" role="status">{data?.currentUser.canWriteAnytime ? 'บัญชีนี้มีสิทธิ์เพิ่มและแก้ไขงานได้ทุกช่วงเวลา · เลือกวันที่ของงานก่อนบันทึก' : 'เลือกวันที่ของงานได้ตลอดเวลา · ส่งและแก้ไขงานตั้งแต่ 14:00 น. ของวันที่ระบุ ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย'} · บันทึกทุกรายการพร้อมกัน · บังคับกรอกทุกช่องและเลือกประเภทในทุกรายการ</p>
+        <p className="mb-5 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900" role="status">{data?.currentUser.canWriteAnytime ? 'บัญชีนี้มีสิทธิ์เพิ่ม แก้ไข และลบงานได้ทุกช่วงเวลา · เลือกวันที่ของงานก่อนบันทึก' : 'เลือกวันที่ของงานได้ตลอดเวลา · ส่งและแก้ไขงานตั้งแต่ 14:00 น. ของวันที่ระบุ ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย'} · บันทึกทุกรายการพร้อมกัน · บังคับกรอกทุกช่องและเลือกประเภทในทุกรายการ</p>
         {data?.backfillGrants.map(grant => <p key={grant.id} className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">HR เปิดให้ส่งและแก้ไขย้อนหลัง วันที่ {grant.startDate} ถึง {grant.endDate} · ปิดรับ {formatTime(grant.closesAt)}</p>)}
         {error && <p role="alert" className="mb-4 text-sm text-rose-600">{error}</p>}
         <form onSubmit={submit} className="space-y-4">
@@ -220,7 +220,7 @@ export function WorkSubmissionsPanel() {
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
             <TableCell className="text-right">{row.canEdit ? <div className="flex justify-end gap-2">
               <Button size="sm" variant="outline" disabled={!writeDateOpen(row.date) || saving} title={writeDateOpen(row.date) ? 'แก้ไขรายการ' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button>
-              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'ลบรายการ' : 'อยู่นอกช่วงเวลาที่อนุญาตให้ลบ'} onClick={() => setDeleteTarget({ ...row })}><Trash2 /> ลบ</Button>
+              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" disabled={!writeDateOpen(row.date) || saving} title={writeDateOpen(row.date) ? 'ลบรายการ' : 'อยู่นอกช่วงเวลาที่อนุญาตให้ลบ'} onClick={() => setDeleteTarget({ ...row })}><Trash2 /> ลบ</Button>
             </div> : '—'}</TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
@@ -233,11 +233,11 @@ export function WorkSubmissionsPanel() {
     {data?.currentUser.role === 'hr' && <TabsContent value="backfill"><WorkSubmissionBackfillPanel onChanged={() => setRefresh(current => current + 1)} /></TabsContent>}
     {data?.currentUser.role === 'hr' && <TabsContent value="api"><WorkSubmissionApiPanel currentTeam={data.currentUser.team} /></TabsContent>}
     <Dialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open && !saving) setDeleteTarget(null); }}>
-      <DialogContent><DialogHeader><DialogTitle>ยืนยันลบรายการส่งงาน</DialogTitle><DialogDescription>ลบได้เฉพาะรายการของตัวเอง ในช่วง 14:00 น. ของวันที่งาน ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย หรือช่วงย้อนหลังที่ HR เปิดให้ การลบจะลดจำนวนงานที่ส่งของวันที่นั้น</DialogDescription></DialogHeader>
+      <DialogContent><DialogHeader><DialogTitle>ยืนยันลบรายการส่งงาน</DialogTitle><DialogDescription>{data?.currentUser.canWriteAnytime ? 'บัญชีนี้ลบรายการของตนเองและผู้อื่นได้ทุกช่วงเวลา ตามสิทธิ์ที่ HR กำหนด' : 'ลบได้เฉพาะรายการของตัวเอง ในช่วง 14:00 น. ของวันที่งาน ถึงก่อน 10:00 น. ของวันถัดไป เวลาไทย หรือช่วงย้อนหลังที่ HR เปิดให้'} · การลบจะลดจำนวนงานที่ส่งของวันที่นั้น</DialogDescription></DialogHeader>
         {deleteTarget && <>
           <dl className="grid gap-2 rounded-lg border bg-slate-50 p-4 text-sm"><div><dt className="font-medium">คีย์</dt><dd className="break-all">{deleteTarget.keyword}</dd></div><div><dt className="font-medium">เว็บ</dt><dd className="break-all">{deleteTarget.website}</dd></div><div><dt className="font-medium">วันที่งาน</dt><dd>{new Date(`${deleteTarget.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</dd></div></dl>
-          {!dateOpen(deleteTarget.date) && <p role="alert" className="text-sm text-amber-700">อยู่นอกช่วงเวลาที่อนุญาตให้ลบรายการนี้</p>}
-          <div className="flex justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => setDeleteTarget(null)}>ยกเลิก</Button><Button variant="destructive" disabled={saving || !dateOpen(deleteTarget.date)} onClick={confirmDelete}>{saving ? <Loader2 className="animate-spin" /> : <Trash2 />} ยืนยันลบ</Button></div>
+          {!writeDateOpen(deleteTarget.date) && <p role="alert" className="text-sm text-amber-700">อยู่นอกช่วงเวลาที่อนุญาตให้ลบรายการนี้</p>}
+          <div className="flex justify-end gap-2"><Button variant="outline" disabled={saving} onClick={() => setDeleteTarget(null)}>ยกเลิก</Button><Button variant="destructive" disabled={saving || !writeDateOpen(deleteTarget.date)} onClick={confirmDelete}>{saving ? <Loader2 className="animate-spin" /> : <Trash2 />} ยืนยันลบ</Button></div>
         </>}
       </DialogContent>
     </Dialog>
