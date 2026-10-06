@@ -24,7 +24,7 @@ test('migration gate blocks all database routes including login, notifications a
 test('maintenance document is visible, status uses no database and only asset reads bypass', async () => {
   const document = api.migrationMaintenance(request('/', 'GET', 'text/html'), true);
   assert.equal(document.status, 503);
-  assert.match(await document.text(), /กำลังย้ายฐานข้อมูล/);
+  assert.match(await document.text(), /ปิดปรับปรุงระบบ/);
   const status = api.migrationMaintenance(request('/api/migration-status'), true);
   assert.deepEqual(await status.json(), { maintenance: true });
   assert.equal(api.migrationMaintenance(request('/_next/static/app.js'), true), null);

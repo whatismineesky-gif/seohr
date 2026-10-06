@@ -17,7 +17,7 @@ config.name = workerName;
 config.hyperdrive = [{ binding: 'HYPERDRIVE', id: 'd788523963fc47e4a0eb262772b6cb92' }];
 // Activate only after the final frozen snapshot has been synchronized and verified.
 // Keep D1 bound as a frozen archive; application reads and writes use PostgreSQL.
-config.vars = { ...config.vars, DATABASE_PROVIDER: 'postgres', MAINTENANCE_MODE: '0' };
+config.vars = { ...config.vars, DATABASE_PROVIDER: 'postgres', MAINTENANCE_MODE: '1' };
 config.routes = [{ pattern: "dev.member-seo.com", custom_domain: true }];
 config.d1_databases = [{
   binding: "DB",
