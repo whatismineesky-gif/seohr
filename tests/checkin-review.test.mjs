@@ -32,9 +32,11 @@ test('HR review denies other roles before database reads or writes',async()=>{
 });
 test('daily review joins selected-date records and excludes staff outside employment dates without writes',async()=>{
  const now=new Date('2026-10-05T06:06:00Z');
- const db={prepare(sql){let date;return {bind(v){date=v;return this;},async run(){assert.match(sql,/hr_checkin_config/);return {};},async first(){return {system_enabled:1,meeting_late_after:'13:05'};},async all(){if(sql.includes('FROM hr_employees'))return {results:[{id:'A',nickname:'A',status:'ยังทำงานอยู่'},{id:'B',nickname:'B',status:'ลาออก',end_date:'2026-10-04'},{id:'C',nickname:'C',start_date:'2026-10-06'},{id:'D',nickname:'D',status:'ลาออก',end_date:day}]};assert.equal(date,day);return {results:sql.includes('hr_employee_checkins')?[]:[{id:1,employee_id:'A',record_type:'absence',source_type:'manual',reason:'leave'}]};}};}};
+ const answer='สรุปหลังประชุม\n'+ 'คำตอบยาว '.repeat(120) + '<script>literal text</script>';
+ const db={prepare(sql){let date;return {bind(v){date=v;return this;},async run(){assert.match(sql,/hr_checkin_config/);return {};},async first(){return {system_enabled:1,meeting_late_after:'13:05'};},async all(){if(sql.includes('FROM hr_employees'))return {results:[{id:'A',nickname:'A',status:'ยังทำงานอยู่'},{id:'B',nickname:'B',status:'ลาออก',end_date:'2026-10-04'},{id:'C',nickname:'C',start_date:'2026-10-06'},{id:'D',nickname:'D',status:'ลาออก',end_date:day}]};assert.equal(date,day);return {results:sql.includes('hr_employee_checkins')?[{employee_id:'A',meeting_answer:answer,meeting_started_at:'2026-10-05T06:00:00Z',meeting_late:0}]:[{id:1,employee_id:'A',record_type:'absence',source_type:'manual',reason:'leave'}]};}};}};
  const result=await checkin(db).getDailyCheckinReview({role:'hr'},day,now);
  assert.deepEqual(result.items.map(i=>[i.employeeId,i.status]),[['A','exempt'],['D','late']]);
+ assert.equal(result.items[0].meetingAnswer,answer);assert.equal(result.items[1].meetingAnswer,'');
 });
 test('HR save refuses foreign employee/date and submission-audit records, and keeps actor from authenticated user',async()=>{
  const user={role:'hr',email:'hr@example.test'};let record={employee_id:'B',record_date:day,source_type:'manual'},saved;
