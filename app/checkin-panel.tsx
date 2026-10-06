@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckinSummaryPanel } from "./checkin-summary-panel";
 import { CheckinReviewPanel } from "./checkin-review-panel";
 
 import { useEffect, useState } from "react";
@@ -184,6 +185,7 @@ export function CheckinPanel() {
         <TabsList>
           <TabsTrigger value="checkin"><CalendarCheck /> เช็คชื่อ</TabsTrigger>
           {isHr && <TabsTrigger value="review"><CalendarCheck /> ตรวจเช็คชื่อ / HR</TabsTrigger>}
+          {isHr && <TabsTrigger value="summary"><CalendarCheck /> รายงานสรุป</TabsTrigger>}
           {isHr && <TabsTrigger value="config"><Settings2 /> Config</TabsTrigger>}
         </TabsList>
         <Button variant="outline" onClick={() => void load()} disabled={loading}>
@@ -276,6 +278,8 @@ export function CheckinPanel() {
       </TabsContent>
 
       {isHr && <TabsContent value="review"><CheckinReviewPanel /></TabsContent>}
+
+      {isHr && <TabsContent value="summary"><CheckinSummaryPanel /></TabsContent>}
 
       {isHr && <TabsContent value="config" className="space-y-5">
         <section className="panel">
