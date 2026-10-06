@@ -5,7 +5,7 @@ export class IntegrationError extends Error {
   constructor(public status: number, message: string, public retryAfter?: number) { super(message); }
 }
 const tokenPattern = /^hrws_[a-f0-9]{64}$/;
-const labels: Record<string, string> = { new: 'เว็บใหม่', '301': 'เว็บ 301', '301_new': 'เว็บ 301 ขึ้นใหม่' };
+const labels: Record<string, string> = { new: 'เว็บใหม่', '301': 'เว็บ 301 ยกธีม', '301_new': 'เว็บ 301 ขึ้นใหม่' };
 const iso = (value: unknown) => value ? new Date(String(value).includes('T') ? String(value) : `${String(value).replace(' ', 'T')}Z`).toISOString() : null;
 function requireHr(user: SystemUser) { if (user.role !== 'hr') throw new IntegrationError(403, 'เฉพาะ HR เท่านั้นที่จัดการ API Key ได้'); }
 function dateValue(value: string) {

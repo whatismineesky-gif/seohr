@@ -138,7 +138,7 @@ test('explicit editor can edit/delete foreign work, list exposes controls, and a
   assert.equal(f.count(),0);f.sqlite.close();
 });
 
-test('editor cannot bypass normal window, own scoped backfill, malformed grants or revocation during mutation', async () => {
+test('editor edits at any time but deletion still respects windows and backfill; malformed or revoked editor rights are denied', async () => {
   for (const operation of ['edit','delete']) {
     for(const raw of ['broken work_submission_editor','{"work_submission_editor":true}','["work_submission_editor_extra"]']) {
       const f=fixture();allowEditor(f,raw);
@@ -155,8 +155,9 @@ test('editor cannot bypass normal window, own scoped backfill, malformed grants 
         if(mode==='backfill-revoked')f.sqlite.exec("UPDATE hr_work_submission_backfill_grants SET revoked_at='2026-10-04T02:00:00Z'");
       });
       const action=()=>operation==='edit'?f.api.editWorkSubmission(editor,{...editInput,date},clock('2026-10-04T02:00:00Z')):f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-04T02:00:00Z'));
-      if(mode==='backfill-allowed')await action();else await assert.rejects(action);
-      if(operation==='edit')assert.equal(f.sqlite.prepare('SELECT keyword FROM hr_work_submissions').get().keyword,mode==='backfill-allowed'?'edited':'คีย์');
+      const allowed = mode==='backfill-allowed' || (operation==='edit' && mode!=='permission-revoked');
+      if(allowed)await action();else await assert.rejects(action);
+      if(operation==='edit')assert.equal(f.sqlite.prepare('SELECT keyword FROM hr_work_submissions').get().keyword,allowed?'edited':'คีย์');
       else assert.equal(f.count(),mode==='backfill-allowed'?0:1);
       f.sqlite.close();
     }
@@ -189,4 +190,28 @@ test('editor configuration API requires HR for both reading and saving', async()
   new Function('require','exports',compile)(name=>name.includes('/auth')?{authorizeApi:async(_req,options)=>{assert.deepEqual(options,{anyPermissions:['submissions'],roles:['hr']});return {ok:false,response:new Response(null,{status:403})};}}:{getWorkSubmissionEditorConfig:()=>{called=true;},saveWorkSubmissionEditorConfig:()=>{called=true;}},blocked);
   for(const method of ['GET','POST'])assert.equal((await blocked[method](new Request('https://test/api/work-submissions/editors',{method}))).status,403);
   assert.equal(called,false);
+});
+
+test('editor creates batches on past and future dates; ordinary accounts remain restricted and revocation takes effect', async()=>{
+  const sqlite=new DatabaseSync(':memory:');
+  sqlite.exec(`CREATE TABLE hr_employees(id TEXT PRIMARY KEY,nickname TEXT,team TEXT);
+    CREATE TABLE hr_system_users(email TEXT,menu_permissions TEXT);
+    INSERT INTO hr_employees VALUES ('B','บี','ทีม 2');
+    INSERT INTO hr_system_users VALUES ('b@test','["submissions","work_submission_editor"]');
+    CREATE TABLE hr_notifications(id INTEGER PRIMARY KEY, employee_id TEXT,source_kind TEXT,source_id INTEGER,actor_email TEXT,actor_user_id TEXT,actor_name TEXT,event_date TEXT,action TEXT,details TEXT);`);
+  for(const migration of ['1022_work_submissions.sql','1023_work_submission_integrations.sql','1026_work_submission_backfill.sql'])sqlite.exec(readFileSync(new URL(`../migrations/${migration}`,import.meta.url),'utf8'));
+  const db={batch(statements){sqlite.exec('BEGIN');try{const results=statements.map(s=>s.run());sqlite.exec('COMMIT');return results;}catch(e){sqlite.exec('ROLLBACK');throw e;}},prepare(sql){let args=[];const stmt={bind(...values){args=values;return stmt;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){const r=sqlite.prepare(sql).run(...args);return {meta:{changes:Number(r.changes),last_row_id:Number(r.lastInsertRowid)}};}};return stmt;}};
+  const compile=p=>ts.transpileModule(readFileSync(new URL(p,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+  const period={},permissions={},api={};new Function('exports',compile('../lib/work-submission-window.ts'))(period);new Function('exports',compile('../lib/work-submission-permissions.ts'))(permissions);
+  new Function('require','exports',compile('../db/work-submissions.ts'))(name=>name.includes('work-submission-permissions')?permissions:name.includes('work-submission-window')?period:{getD1:()=>db},api);
+  const now=clock('2026-10-06T04:00:00Z');
+  const items=[{...editInput,date:'2026-10-01'},{...editInput,date:'2026-10-07'}];
+  assert.equal((await api.createWorkSubmission(editor,{items},now)).count,2);
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_work_submissions').get().n,2);
+  assert.equal(JSON.parse(sqlite.prepare('SELECT details FROM hr_notifications').get().details).count,2);
+  await assert.rejects(api.createWorkSubmission({...editor,email:'other@test'}, {items},now));
+  await assert.rejects(api.createWorkSubmission(editor,{items:[{...editInput,date:'2026-02-30'}]},now));
+  sqlite.exec(`UPDATE hr_system_users SET menu_permissions='["submissions"]'`);
+  await assert.rejects(api.createWorkSubmission(editor,{items},now));
+  assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM hr_work_submissions').get().n,2);sqlite.close();
 });
