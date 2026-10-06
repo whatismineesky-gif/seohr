@@ -138,7 +138,7 @@ test('explicit editor can edit/delete foreign work, list exposes controls, and a
   assert.equal(f.count(),0);f.sqlite.close();
 });
 
-test('editor edits at any time but deletion still respects windows and backfill; malformed or revoked editor rights are denied', async () => {
+test('editor edits and deletes at any time; malformed or revoked editor rights are denied', async () => {
   for (const operation of ['edit','delete']) {
     for(const raw of ['broken work_submission_editor','{"work_submission_editor":true}','["work_submission_editor_extra"]']) {
       const f=fixture();allowEditor(f,raw);
@@ -155,10 +155,10 @@ test('editor edits at any time but deletion still respects windows and backfill;
         if(mode==='backfill-revoked')f.sqlite.exec("UPDATE hr_work_submission_backfill_grants SET revoked_at='2026-10-04T02:00:00Z'");
       });
       const action=()=>operation==='edit'?f.api.editWorkSubmission(editor,{...editInput,date},clock('2026-10-04T02:00:00Z')):f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-04T02:00:00Z'));
-      const allowed = mode==='backfill-allowed' || (operation==='edit' && mode!=='permission-revoked');
+      const allowed = mode!=='permission-revoked';
       if(allowed)await action();else await assert.rejects(action);
       if(operation==='edit')assert.equal(f.sqlite.prepare('SELECT keyword FROM hr_work_submissions').get().keyword,allowed?'edited':'คีย์');
-      else assert.equal(f.count(),mode==='backfill-allowed'?0:1);
+      else assert.equal(f.count(),allowed?0:1);
       f.sqlite.close();
     }
   }
