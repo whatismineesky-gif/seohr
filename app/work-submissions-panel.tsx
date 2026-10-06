@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkSubmissionEditorsPanel } from "./work-submission-editors-panel";
+
 import { defaultSubmissionDate, workSubmissionWindow } from '@/lib/work-submission-window';
 
 import { WorkSubmissionBackfillPanel } from "./work-submission-backfill-panel";
@@ -162,7 +164,7 @@ export function WorkSubmissionsPanel() {
   const canSaveEdit = Boolean(editTarget && originalEditDate && dateOpen(originalEditDate) && dateOpen(editTarget.date));
   const formatTime = (value: string) => value ? new Date(value).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }) : 'กรุณาระบุวันที่ให้ถูกต้อง';
   return <Tabs value={tab} onValueChange={setTab}>
-    <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger>{data?.currentUser.role === 'hr' && <><TabsTrigger value="backfill">เปิดส่งงานย้อนหลัง</TabsTrigger><TabsTrigger value="api"><KeyRound /> API / เชื่อมระบบ</TabsTrigger></>}</TabsList>
+    <TabsList><TabsTrigger value="create"><Save /> บันทึกส่งงาน</TabsTrigger><TabsTrigger value="list"><ClipboardList /> ข้อมูลการส่งงาน</TabsTrigger>{data?.currentUser.role === 'hr' && <><TabsTrigger value="editors">สิทธิ์แก้ไข / ลบ</TabsTrigger><TabsTrigger value="backfill">เปิดส่งงานย้อนหลัง</TabsTrigger><TabsTrigger value="api"><KeyRound /> API / เชื่อมระบบ</TabsTrigger></>}</TabsList>
     <TabsContent value="create">
       <section className="panel min-w-0">
         <div className="panel-heading mb-5"><div><p className="section-kicker">NEW WORK SUBMISSION</p><h2>บันทึกส่งงานใหม่</h2>
@@ -216,8 +218,8 @@ export function WorkSubmissionsPanel() {
             <TableCell>{new Date(`${row.date}T00:00:00Z`).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}{row.isBackfill && <span className="block text-xs text-amber-700" title={`ส่งจริง ${formatTime(row.submittedAt)}`}>ส่งย้อนหลัง</span>}</TableCell><TableCell><span className="block w-72 truncate" title={row.parentWebsite}>{row.parentWebsite}</span></TableCell>
             <TableCell>{types.find(type => type.value === row.type)?.label ?? row.type}</TableCell>
             <TableCell className="text-right">{row.canEdit ? <div className="flex justify-end gap-2">
-              <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการของฉัน' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button>
-              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'ลบรายการของฉัน' : 'อยู่นอกช่วงเวลาที่อนุญาตให้ลบ'} onClick={() => setDeleteTarget({ ...row })}><Trash2 /> ลบ</Button>
+              <Button size="sm" variant="outline" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'แก้ไขรายการ' : 'อยู่นอกช่วงรับแก้ไขของวันที่รายการ'} onClick={() => setEditTarget({ ...row })}><Pencil /> แก้ไข</Button>
+              <Button size="sm" variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700" disabled={!dateOpen(row.date) || saving} title={dateOpen(row.date) ? 'ลบรายการ' : 'อยู่นอกช่วงเวลาที่อนุญาตให้ลบ'} onClick={() => setDeleteTarget({ ...row })}><Trash2 /> ลบ</Button>
             </div> : '—'}</TableCell>
           </TableRow>) : <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">{error ? 'ไม่สามารถโหลดรายการได้' : 'ยังไม่มีข้อมูลการส่งงานตามตัวกรองนี้'}</TableCell></TableRow>}</TableBody>
         </Table>
@@ -226,6 +228,7 @@ export function WorkSubmissionsPanel() {
         </div>
       </section>
     </TabsContent>
+    {data?.currentUser.role === 'hr' && <TabsContent value="editors"><WorkSubmissionEditorsPanel onChanged={() => setRefresh(current => current + 1)} /></TabsContent>}
     {data?.currentUser.role === 'hr' && <TabsContent value="backfill"><WorkSubmissionBackfillPanel onChanged={() => setRefresh(current => current + 1)} /></TabsContent>}
     {data?.currentUser.role === 'hr' && <TabsContent value="api"><WorkSubmissionApiPanel currentTeam={data.currentUser.team} /></TabsContent>}
     <Dialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open && !saving) setDeleteTarget(null); }}>
