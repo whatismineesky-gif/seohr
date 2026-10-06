@@ -7,7 +7,7 @@ import ts from 'typescript';
 function fixture() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`CREATE TABLE hr_employees(id TEXT PRIMARY KEY, nickname TEXT, team TEXT);
-    CREATE TABLE hr_system_users(email TEXT, menu_permissions TEXT);
+    CREATE TABLE hr_system_users(email TEXT, menu_permissions TEXT, display_name TEXT, employee_id TEXT, updated_at TEXT);
     INSERT INTO hr_employees VALUES ('A','เอ','ทีม 1'),('B','บี','ทีม 2');`);
   for (const migration of ['1022_work_submissions.sql','1023_work_submission_integrations.sql','1026_work_submission_backfill.sql']) {
     sqlite.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
@@ -23,15 +23,16 @@ function fixture() {
       bind(...values) { args = values; return stmt; },
       first() { return sqlite.prepare(sql).get(...args) ?? null; },
       all() { return { results: sqlite.prepare(sql).all(...args) }; },
-      run() { if (sql.startsWith('DELETE')) beforeDelete(); const r = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; },
+      run() { if (sql.startsWith('DELETE') || sql.startsWith('UPDATE hr_work_submissions')) beforeDelete(); const r = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; },
     };
     return stmt;
   } };
   const compile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
   const period = {};
   new Function('exports', compile('../lib/work-submission-window.ts'))(period);
+  const permissions = {}; new Function('exports', ts.transpileModule(readFileSync(new URL('../lib/work-submission-permissions.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(permissions);
   const api = {};
-  new Function('require','exports',compile('../db/work-submissions.ts'))(name => name.includes('work-submission-window') ? period : { getD1: () => db }, api);
+  new Function('require','exports',compile('../db/work-submissions.ts'))(name => name.includes('work-submission-permissions') ? permissions : name.includes('work-submission-window') ? period : { getD1: () => db }, api);
   return { sqlite, api, setTime(time) { databaseNow = time; }, beforeDelete(fn) { beforeDelete = fn; }, count() { return sqlite.prepare('SELECT COUNT(*) AS n FROM hr_work_submissions').get().n; } };
 }
 const owner = {email:'A@test', employeeId:'A'};
@@ -112,4 +113,80 @@ test('DELETE endpoint requires submission permission and passes authenticated id
   new Function('require','exports',compile())(name=>name.includes('/auth') ? {authorizeApi:async(_request,options)=>{assert.deepEqual(options,{anyPermissions:['submissions']});return {ok:true,access:{user:owner}};}} : {deleteWorkSubmission:async(user,input)=>{assert.equal(user,owner);assert.equal(input.id,1);return {id:1};}},allowed);
   const response=await allowed.DELETE(new Request('https://example.test/api/work-submissions',{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({id:1})}));
   assert.equal(response.status,200);assert.deepEqual(await response.json(),{id:1});
+});
+
+const editor = {email:'b@test',employeeId:'B',role:'employee'};
+const editInput = {id:1,keyword:'edited',website:'edited.test',parentWebsite:'parent.test',date:'2026-10-03',type:'301'};
+function allowEditor(f, raw='["submissions","work_submission_editor"]') {
+  f.sqlite.prepare('INSERT INTO hr_system_users(email,menu_permissions,display_name,employee_id) VALUES (?,?,?,?)').run('b@test',raw,'บี','B');
+}
+
+test('explicit editor can edit/delete foreign work, list exposes controls, and author metadata stays unchanged', async () => {
+  const f=fixture();allowEditor(f);
+  let list=await f.api.getWorkSubmissions(editor,new URLSearchParams('scope=all'));
+  assert.equal(list.items[0].canEdit,true);
+  await f.api.editWorkSubmission(editor,{...editInput,author_email:'b@test',employeeId:'B',team:'ทีม 2'},clock('2026-10-03T07:00:00Z'));
+  const row=f.sqlite.prepare('SELECT * FROM hr_work_submissions WHERE id=1').get();
+  assert.equal(row.keyword,'edited');assert.equal(row.author_email,'a@test');assert.equal(row.employee_id,'A');
+  f.sqlite.exec(`UPDATE hr_system_users SET menu_permissions='["submissions"]'`);
+  list=await f.api.getWorkSubmissions(editor,new URLSearchParams('scope=all'));
+  assert.equal(list.items[0].canEdit,false);
+  await assert.rejects(f.api.editWorkSubmission(editor,editInput,clock('2026-10-03T07:00:00Z')),/ไม่มีสิทธิ์/);
+  await assert.rejects(f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-03T07:00:00Z')),/ไม่มีสิทธิ์/);
+  f.sqlite.exec(`UPDATE hr_system_users SET menu_permissions='["submissions","work_submission_editor"]'`);
+  await f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-03T07:00:00Z'));
+  assert.equal(f.count(),0);f.sqlite.close();
+});
+
+test('editor cannot bypass normal window, own scoped backfill, malformed grants or revocation during mutation', async () => {
+  for (const operation of ['edit','delete']) {
+    for(const raw of ['broken work_submission_editor','{"work_submission_editor":true}','["work_submission_editor_extra"]']) {
+      const f=fixture();allowEditor(f,raw);
+      await assert.rejects(operation==='edit'?f.api.editWorkSubmission(editor,editInput,clock('2026-10-03T07:00:00Z')):f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-03T07:00:00Z')),/ไม่มีสิทธิ์/);f.sqlite.close();
+    }
+    for(const mode of ['deadline','permission-revoked','backfill-wrong-scope','backfill-allowed','backfill-revoked']) {
+      const f=fixture();allowEditor(f);
+      const date=mode.startsWith('backfill')?'2026-10-01':'2026-10-03';
+      if(mode.startsWith('backfill'))grant(f,'employee',mode==='backfill-wrong-scope'?'A':'B');
+      f.setTime('2026-10-04T02:00:00.000Z');
+      f.beforeDelete(()=>{
+        if(mode==='deadline')f.setTime('2026-10-04T03:00:00.000Z');
+        if(mode==='permission-revoked')f.sqlite.exec(`UPDATE hr_system_users SET menu_permissions='["submissions"]'`);
+        if(mode==='backfill-revoked')f.sqlite.exec("UPDATE hr_work_submission_backfill_grants SET revoked_at='2026-10-04T02:00:00Z'");
+      });
+      const action=()=>operation==='edit'?f.api.editWorkSubmission(editor,{...editInput,date},clock('2026-10-04T02:00:00Z')):f.api.deleteWorkSubmission(editor,{id:1},clock('2026-10-04T02:00:00Z'));
+      if(mode==='backfill-allowed')await action();else await assert.rejects(action);
+      if(operation==='edit')assert.equal(f.sqlite.prepare('SELECT keyword FROM hr_work_submissions').get().keyword,mode==='backfill-allowed'?'edited':'คีย์');
+      else assert.equal(f.count(),mode==='backfill-allowed'?0:1);
+      f.sqlite.close();
+    }
+  }
+});
+
+test('only HR can configure per-account editor flag; grant and revoke preserve menu access and handle empty defaults', async () => {
+  const f=fixture();allowEditor(f,'["submissions","attendance"]');
+  const hr={email:'hr@test',role:'hr'};
+  for(const role of ['employee','audit']) {
+    await assert.rejects(f.api.getWorkSubmissionEditorConfig({...hr,role}),/เฉพาะ HR/);
+    await assert.rejects(f.api.saveWorkSubmissionEditorConfig({...hr,role},{email:'b@test',enabled:true}),/เฉพาะ HR/);
+  }
+  for(const input of [{email:'missing@test',enabled:true},{email:'b@test',enabled:'true'},{}])await assert.rejects(f.api.saveWorkSubmissionEditorConfig(hr,input));
+  await f.api.saveWorkSubmissionEditorConfig(hr,{email:'B@test',enabled:true});
+  assert.deepEqual(JSON.parse(f.sqlite.prepare('SELECT menu_permissions FROM hr_system_users').get().menu_permissions),['submissions','attendance','work_submission_editor']);
+  assert.equal((await f.api.getWorkSubmissionEditorConfig(hr)).users[0].enabled,true);
+  await f.api.saveWorkSubmissionEditorConfig(hr,{email:'b@test',enabled:false});
+  assert.deepEqual(JSON.parse(f.sqlite.prepare('SELECT menu_permissions FROM hr_system_users').get().menu_permissions),['submissions','attendance']);
+  f.sqlite.exec("UPDATE hr_system_users SET menu_permissions='[]'");
+  await f.api.saveWorkSubmissionEditorConfig(hr,{email:'b@test',enabled:true});
+  await f.api.saveWorkSubmissionEditorConfig(hr,{email:'b@test',enabled:false});
+  assert.equal(f.sqlite.prepare('SELECT menu_permissions FROM hr_system_users').get().menu_permissions,'[]');f.sqlite.close();
+});
+
+test('editor configuration API requires HR for both reading and saving', async()=>{
+  const compile=ts.transpileModule(readFileSync(new URL('../app/api/work-submissions/editors/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
+  let called=false;
+  const blocked={};
+  new Function('require','exports',compile)(name=>name.includes('/auth')?{authorizeApi:async(_req,options)=>{assert.deepEqual(options,{anyPermissions:['submissions'],roles:['hr']});return {ok:false,response:new Response(null,{status:403})};}}:{getWorkSubmissionEditorConfig:()=>{called=true;},saveWorkSubmissionEditorConfig:()=>{called=true;}},blocked);
+  for(const method of ['GET','POST'])assert.equal((await blocked[method](new Request('https://test/api/work-submissions/editors',{method}))).status,403);
+  assert.equal(called,false);
 });

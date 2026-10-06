@@ -1,3 +1,4 @@
+import { isSubmissionEditor, submissionEditorPermission } from '../lib/work-submission-permissions';
 import { getD1 } from "./index";
 import { ensureEmployeesSeeded } from "./employees";
 import { ensureAttendanceSetup, type AuthUser, type SystemUser } from "./attendance";
@@ -40,7 +41,7 @@ const roleDefaults: Record<SystemUser["role"], MenuId[]> = {
 function parsePermissions(value: unknown, role: SystemUser["role"]): MenuId[] {
   try {
     const parsed = JSON.parse(String(value ?? "[]"));
-    if (Array.isArray(parsed) && parsed.length)
+    if (Array.isArray(parsed) && parsed.some(id => id !== submissionEditorPermission))
       return menuIds.filter(
         (id) => id !== "dashboard" && (id === "checkin" || parsed.includes(id)),
       );
@@ -151,13 +152,17 @@ export async function saveAccessUser(currentUser: SystemUser, input: Record<stri
     `).bind(crypto.randomUUID(), legacyEmployee?.id ?? null, loginUsername, await hashPassword(password), now, now).run();
   }
   if (userRole === "hr" && !permissions.includes("access")) permissions.push("access");
+  const previousPermissions = await database.prepare('SELECT menu_permissions FROM hr_system_users WHERE email = ? COLLATE NOCASE')
+    .bind(email).first<{ menu_permissions: string }>();
+  const savedPermissions: string[] = [...permissions];
+  if (isSubmissionEditor(previousPermissions?.menu_permissions)) savedPermissions.push(submissionEditorPermission);
   await database.prepare(`
     INSERT INTO hr_system_users (email, user_id, display_name, role, employee_id, menu_permissions, login_username)
     VALUES (?, '', ?, ?, ?, ?, ?)
     ON CONFLICT(email) DO UPDATE SET role = excluded.role, employee_id = excluded.employee_id,
       menu_permissions = excluded.menu_permissions, login_username = excluded.login_username,
       updated_at = CURRENT_TIMESTAMP
-  `).bind(email, email, userRole, employeeId, JSON.stringify(permissions), loginUsername).run();
+  `).bind(email, email, userRole, employeeId, JSON.stringify(savedPermissions), loginUsername).run();
   return { ok: true };
 }
 

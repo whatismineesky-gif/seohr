@@ -6,6 +6,8 @@ import ts from 'typescript';
 
 test('submission ownership, team filters, pagination and validation use authenticated identity', async () => {
   const sqlite = new DatabaseSync(':memory:');
+  let databaseNow = '2026-10-04T02:59:59.999Z';
+  sqlite.function('strftime', { varargs: true }, () => databaseNow);
   sqlite.exec(`PRAGMA foreign_keys=ON;
     CREATE TABLE hr_employees(id TEXT PRIMARY KEY,nickname TEXT,team TEXT);
     CREATE TABLE hr_system_users(email TEXT,menu_permissions TEXT);
@@ -24,11 +26,12 @@ test('submission ownership, team filters, pagination and validation use authenti
     bind(...values) { args = values; return stmt; },
     first() { return sqlite.prepare(sql).get(...args) ?? null; },
     all() { return { results: sqlite.prepare(sql).all(...args) }; },
-    run() { const r = sqlite.prepare(sql).run(...args); return { meta: { last_row_id: Number(r.lastInsertRowid) } }; },
+    run() { const r = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }; },
   }; return stmt; } };
   const code = ts.transpileModule(readFileSync(new URL('../db/work-submissions.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   const period = {}; new Function('exports',ts.transpileModule(readFileSync(new URL('../lib/work-submission-window.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(period);
-  const api = {}; new Function('require','exports',code)(name => name.includes('work-submission-window') ? period : ({ getD1: () => db }), api);
+  const permissions = {}; new Function('exports', ts.transpileModule(readFileSync(new URL('../lib/work-submission-permissions.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(permissions);
+  const api = {}; new Function('require','exports',code)(name => name.includes('work-submission-permissions') ? permissions : name.includes('work-submission-window') ? period : ({ getD1: () => db }), api);
   const realCreate = api.createWorkSubmission;
   const before = new Date('2026-10-04T02:59:59.999Z');
   api.createWorkSubmission = (user,input) => realCreate(user,input,()=>before);
@@ -153,6 +156,7 @@ test('submission ownership, team filters, pagination and validation use authenti
   // HR grants open only the specified past dates, identity scope and deadline.
   const hr = {...unlinked,role:'hr'};
   const grantTime = new Date('2026-10-03T22:06:00Z');
+  databaseNow = grantTime.toISOString();
   const grantInput = {action:'create',startDate:'2026-10-01',endDate:'2026-10-02',scope:'all',closesAt:'2026-10-04T10:00',reason:'เติมข้อมูลทดสอบ'};
   for(const role of ['employee','audit']) await assert.rejects(api.saveWorkSubmissionBackfill({...hr,role},grantInput,grantTime), /เฉพาะ HR/);
   await assert.rejects(api.getWorkSubmissionBackfillConfig({...hr,role:'employee'}),/เฉพาะ HR/);

@@ -1,5 +1,6 @@
 import { defaultSubmissionDate, workSubmissionWindow } from '../lib/work-submission-window';
 import { getD1 } from './index';
+import { isSubmissionEditor, storedPermissions, submissionEditorPermission } from '../lib/work-submission-permissions';
 import type { SystemUser } from './attendance';
 
 export const submissionTypes = ['new', '301', '301_new'] as const;
@@ -82,44 +83,87 @@ export async function createWorkSubmission(user: SystemUser, input: Record<strin
   return { count: validated.length, id: results[validated.length - 1].meta.last_row_id };
 }
 
+async function editorSnapshot(user: SystemUser) {
+  const row = await getD1().prepare('SELECT menu_permissions FROM hr_system_users WHERE email = ? COLLATE NOCASE')
+    .bind(user.email).first<{ menu_permissions: string }>();
+  return isSubmissionEditor(row?.menu_permissions) ? row!.menu_permissions : null;
+}
+
+const mutationPermission = `(author_email = ? COLLATE NOCASE OR EXISTS (
+  SELECT 1 FROM hr_system_users u WHERE u.email = ? COLLATE NOCASE AND u.menu_permissions = ?))`;
+const mutationWindow = `((strftime('%Y-%m-%dT%H:%M:%fZ', 'now') >= ? AND strftime('%Y-%m-%dT%H:%M:%fZ', 'now') < ?)
+  OR EXISTS (SELECT 1 FROM hr_work_submission_backfill_grants g WHERE g.id = ?
+    AND g.revoked_at IS NULL AND g.closes_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    AND g.start_date <= ? AND g.end_date >= ?))`;
+
+async function mutationContext(user: SystemUser, id: number) {
+  const db = getD1();
+  const row = await db.prepare('SELECT id, work_date, author_email FROM hr_work_submissions WHERE id = ?')
+    .bind(id).first<{ id: number; work_date: string; author_email: string }>();
+  const permission = await editorSnapshot(user);
+  if (!row || (row.author_email.toLowerCase() !== user.email.toLowerCase() && permission === null))
+    throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์แก้ไขหรือลบรายการนี้');
+  return { row, permission };
+}
+
+function windowBindings(date: string, grantId: number | null, now: Date) {
+  const period = submissionWindow(now, date);
+  return [new Date(period.opensAt).toISOString(), new Date(period.closesAt).toISOString(), grantId, date, date];
+}
+
 export async function editWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
   const fields = validateSubmission(input);
   await assertOpenDates(user, [fields.date], clock());
   const id = Number(input.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
-  const db = getD1();
-  const owned = await db.prepare('SELECT id, work_date FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
-    .bind(id, user.email).first<{ id: number; work_date: string }>();
-  if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์แก้ไขรายการนี้');
+  const { row, permission } = await mutationContext(user, id);
   const now = clock();
-  await assertOpenDates(user, [owned.work_date, fields.date], now);
-  await db.prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND author_email = ? COLLATE NOCASE`)
-    .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, user.email).run();
+  const grants = await assertOpenDates(user, [row.work_date, fields.date], now);
+  const result = await getD1().prepare(`UPDATE hr_work_submissions SET keyword = ?, website = ?, work_date = ?, parent_website = ?, submission_type = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND ${mutationWindow} AND ${mutationWindow}`)
+    .bind(fields.keyword, fields.website, fields.date, fields.parent, fields.type, id, row.work_date,
+      user.email, user.email, permission, ...windowBindings(row.work_date, grants[0], now), ...windowBindings(fields.date, grants[1], now)).run();
+  if (Number(result.meta.changes) !== 1) throw new Error('รายการหรือสิทธิ์มีการเปลี่ยนแปลง หรือหมดเวลาแล้ว กรุณาโหลดข้อมูลใหม่');
   return { id };
 }
 
 export async function deleteWorkSubmission(user: SystemUser, input: Record<string, unknown>, clock = () => new Date()) {
   const id = Number(input?.id);
   if (!Number.isSafeInteger(id) || id < 1) throw new Error('รายการส่งงานไม่ถูกต้อง');
-  const db = getD1();
-  const owned = await db.prepare('SELECT id, work_date FROM hr_work_submissions WHERE id = ? AND author_email = ? COLLATE NOCASE')
-    .bind(id, user.email).first<{ id: number; work_date: string }>();
-  if (!owned) throw new Error('ไม่พบรายการหรือไม่มีสิทธิ์ลบรายการนี้');
-  await assertOpenDates(user, [owned.work_date], clock());
-  // Recheck after permission queries so a request crossing the deadline is rejected.
-  const [grantId] = await assertOpenDates(user, [owned.work_date], clock());
-  const period = submissionWindow(clock(), owned.work_date);
-  // Enforce the deadline and grant revocation at the database statement itself.
-  const result = await db.prepare(`DELETE FROM hr_work_submissions
-    WHERE id = ? AND author_email = ? COLLATE NOCASE AND work_date = ? AND (
-      (strftime('%Y-%m-%dT%H:%M:%fZ', 'now') >= ? AND strftime('%Y-%m-%dT%H:%M:%fZ', 'now') < ?)
-      OR EXISTS (SELECT 1 FROM hr_work_submission_backfill_grants g WHERE g.id = ?
-        AND g.revoked_at IS NULL AND g.closes_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        AND g.start_date <= hr_work_submissions.work_date AND g.end_date >= hr_work_submissions.work_date)
-    )`).bind(id, user.email, owned.work_date, new Date(period.opensAt).toISOString(), new Date(period.closesAt).toISOString(), grantId).run();
-  if (Number(result.meta.changes) !== 1) throw new Error('ไม่พบรายการ รายการมีการเปลี่ยนแปลง หรือหมดเวลาลบแล้ว กรุณาโหลดข้อมูลใหม่');
+  const { row, permission } = await mutationContext(user, id);
+  await assertOpenDates(user, [row.work_date], clock());
+  const now = clock();
+  const [grantId] = await assertOpenDates(user, [row.work_date], now);
+  const result = await getD1().prepare(`DELETE FROM hr_work_submissions
+    WHERE id = ? AND work_date = ? AND ${mutationPermission} AND ${mutationWindow}`)
+    .bind(id, row.work_date, user.email, user.email, permission, ...windowBindings(row.work_date, grantId, now)).run();
+  if (Number(result.meta.changes) !== 1) throw new Error('รายการหรือสิทธิ์มีการเปลี่ยนแปลง หรือหมดเวลาลบแล้ว กรุณาโหลดข้อมูลใหม่');
   return { id };
+}
+
+export async function getWorkSubmissionEditorConfig(user: SystemUser) {
+  if (user.role !== 'hr') throw new Error('เฉพาะ HR เท่านั้นที่กำหนดสิทธิ์แก้ไขหรือลบได้');
+  const rows = await getD1().prepare(`SELECT u.email, u.display_name, u.employee_id, u.menu_permissions, e.nickname, e.team
+    FROM hr_system_users u LEFT JOIN hr_employees e ON e.id = u.employee_id ORDER BY e.team, e.nickname, u.email`)
+    .all<Record<string, unknown>>();
+  return { users: rows.results.map(row => ({ email: String(row.email), name: String(row.nickname || row.display_name || row.email),
+    employeeId: String(row.employee_id ?? ''), team: String(row.team ?? ''), enabled: isSubmissionEditor(row.menu_permissions) })) };
+}
+
+export async function saveWorkSubmissionEditorConfig(user: SystemUser, input: Record<string, unknown>) {
+  if (user.role !== 'hr') throw new Error('เฉพาะ HR เท่านั้นที่กำหนดสิทธิ์แก้ไขหรือลบได้');
+  if (typeof input?.email !== 'string' || typeof input.enabled !== 'boolean') throw new Error('ข้อมูลสิทธิ์ไม่ถูกต้อง');
+  const email = input.email.trim().toLowerCase();
+  const db = getD1();
+  const row = await db.prepare('SELECT menu_permissions FROM hr_system_users WHERE email = ? COLLATE NOCASE')
+    .bind(email).first<{ menu_permissions: string }>();
+  if (!row) throw new Error('ไม่พบบัญชีผู้ใช้งาน');
+  const permissions = storedPermissions(row.menu_permissions).filter(item => item !== submissionEditorPermission);
+  if (input.enabled) permissions.push(submissionEditorPermission);
+  const result = await db.prepare(`UPDATE hr_system_users SET menu_permissions = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE email = ? COLLATE NOCASE AND menu_permissions = ?`).bind(JSON.stringify(permissions), email, row.menu_permissions).run();
+  if (Number(result.meta.changes) !== 1) throw new Error('สิทธิ์มีการเปลี่ยนแปลง กรุณาโหลดข้อมูลใหม่');
+  return { ok: true };
 }
 
 function filters(user: SystemUser, params: URLSearchParams) {
@@ -140,18 +184,19 @@ function filters(user: SystemUser, params: URLSearchParams) {
 export async function getWorkSubmissions(user: SystemUser, params: URLSearchParams) {
   const { where, args, page } = filters(user, params);
   const db = getD1();
-  const [rows, count, teams, employee, backfillGrants] = await Promise.all([
+  const [rows, count, teams, employee, backfillGrants, editorPermission] = await Promise.all([
     db.prepare(`SELECT id, keyword, website, work_date, parent_website, submission_type, employee_id, author_name, team, author_email, created_at, backfill_grant_id FROM hr_work_submissions ${where}
       ORDER BY work_date DESC, id DESC LIMIT 100 OFFSET ?`).bind(...args, (page - 1) * 100).all<Record<string, unknown>>(),
     db.prepare(`SELECT COUNT(*) AS total FROM hr_work_submissions ${where}`).bind(...args).first<{ total: number }>(),
     db.prepare(`SELECT team FROM hr_employees WHERE team <> '' UNION SELECT team FROM hr_work_submissions ORDER BY team`).all<{ team: string }>(),
     employeeInfo(user),
     activeBackfillGrants(user, new Date()),
+    editorSnapshot(user),
   ]);
   return { items: rows.results.map(row => ({ id: Number(row.id), keyword: String(row.keyword), website: String(row.website),
     employeeId: String(row.employee_id ?? ''), authorName: String(row.author_name ?? ''), team: String(row.team ?? ''),
     submittedAt: String(row.created_at).replace(' ', 'T') + 'Z', isBackfill: row.backfill_grant_id != null,
-    date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type), canEdit: String(row.author_email).toLowerCase() === user.email.toLowerCase() })),
+    date: String(row.work_date), parentWebsite: String(row.parent_website), type: String(row.submission_type), canEdit: editorPermission !== null || String(row.author_email).toLowerCase() === user.email.toLowerCase() })),
     total: Number(count?.total ?? 0), page, pageSize: 100,
     window: submissionWindow(),
     backfillGrants: backfillGrants.map(item => ({ id: Number(item.id), startDate: item.start_date, endDate: item.end_date, closesAt: item.closes_at })),
